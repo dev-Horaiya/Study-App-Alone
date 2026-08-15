@@ -171,6 +171,7 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .toast.show{ opacity:1; transform:translateY(0); }
 ::-webkit-scrollbar{ width:8px; height:8px; }
 ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
+input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:0; background:none; }
 </style>
 </head>
 <body>
@@ -219,6 +220,9 @@ const ICONS = {
   play: ISVG(`<circle cx="12" cy="12" r="8.5"/><path d="M10 8.5 15.5 12 10 15.5Z"/>`),
   warning: ISVG(`<path d="M12 3.5 21.5 20h-19Z"/><path d="M12 9.5v5"/><path d="M12 17.3v.2"/>`),
   plus: ISVG(`<path d="M12 5v14M5 12h14"/>`),
+  music: ISVG(`<path d="M9 17.5V4.5l10.5-2V15"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17" cy="15" r="2.5"/>`),
+  pause: ISVG(`<rect x="6" y="4.5" width="4.5" height="15" rx="1"/><rect x="13.5" y="4.5" width="4.5" height="15" rx="1"/>`),
+  speaker: ISVG(`<path d="M4 9.5h3.5L13 5v14L7.5 14.5H4Z"/><path d="M16.5 9a4.2 4.2 0 0 1 0 6"/><path d="M19 6.7a8 8 0 0 1 0 10.6"/>`),
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -227,7 +231,8 @@ function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
 function defaultState(){
   return {
     profile:{ name:'Student', createdAt: todayStr() },
-    settings:{ darkMode:false, workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false },
+    settings:{ darkMode:false, workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
+      music:{ enabled:false, volume:0.5, fileName:'' } },
     subjects:[],
     sessions:[], // {id, subjectId, minutes, date, type}
     notes:[], // {id, subjectId, title, body, updatedAt}
@@ -236,12 +241,20 @@ function defaultState(){
   };
 }
 let state = load();
+function mergeState(parsed){
+  const def = defaultState();
+  const merged = Object.assign(def, parsed);
+  merged.profile = Object.assign(def.profile, parsed.profile||{});
+  merged.settings = Object.assign(def.settings, parsed.settings||{});
+  merged.settings.music = Object.assign({enabled:false, volume:0.5, fileName:''}, (parsed.settings&&parsed.settings.music)||{});
+  return merged;
+}
 function load(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return Object.assign(defaultState(), parsed);
+    return mergeState(parsed);
   }catch(e){ return defaultState(); }
 }
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -352,6 +365,149 @@ function confirmAction(message, onConfirm, confirmLabel){
   document.getElementById('confirmOk').addEventListener('click', ()=>{ closeModal(); onConfirm(); });
 }
 
+/* ============ SOUND ENGINE ============ */
+/* All SFX are synthesized locally via Web Audio — no external audio files, so everything
+   still works fully offline. Browsers only allow audio to start from a direct click, so we
+   unlock the context on the very first click anywhere, and surface a toast if playback
+   ever actually fails instead of failing silently. */
+let actx = null;
+let audioUnlocked = false;
+function getActx(){
+  if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+  return actx;
+}
+function unlockAudio(){
+  if(audioUnlocked) return;
+  try{
+    const ctx = getActx();
+    if(ctx.state === 'suspended') ctx.resume();
+    audioUnlocked = true;
+  }catch(e){}
+}
+document.addEventListener('click', unlockAudio, {once:true});
+document.addEventListener('keydown', unlockAudio, {once:true});
+
+function playSequence(notes){
+  if(!state.settings.sfx) return false;
+  try{
+    const ctx = getActx();
+    if(ctx.state === 'suspended') ctx.resume();
+    notes.forEach(([freq, offset, dur, type, gain])=>{
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, ctx.currentTime + offset);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      g.gain.exponentialRampToValueAtTime(gain||0.12, ctx.currentTime + offset + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + dur);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + offset); o.stop(ctx.currentTime + offset + dur + 0.05);
+    });
+    return true;
+  }catch(e){
+    toast('Sound couldn\'t play — click anywhere on the page once, then try again.');
+    return false;
+  }
+}
+/* Quick perky blip — "here we go" cue for starting either timer */
+function sfxStart(){ playSequence([[587.33,0,0.08,'sine',0.12],[880,0.08,0.13,'sine',0.14]]); }
+/* Crisp double-beep — a focus sprint just ended */
+function sfxWorkComplete(){ playSequence([[880,0,0.11,'triangle',0.15],[880,0.15,0.14,'triangle',0.15]]); }
+/* Slow, mellow descending chime — signals break time, deliberately calming */
+function sfxBreakStart(){ playSequence([[659.25,0,0.22,'sine',0.11],[523.25,0.2,0.26,'sine',0.11],[392,0.44,0.4,'sine',0.1]]); }
+/* Bright ascending triad — break's over, back to focus */
+function sfxBreakEnd(){ playSequence([[440,0,0.1,'sine',0.13],[523.25,0.1,0.1,'sine',0.13],[659.25,0.2,0.2,'sine',0.15]]); }
+/* Soft single tick — confirms a stopwatch session was logged */
+function sfxStopwatchStop(){ playSequence([[600,0,0.16,'sine',0.13]]); }
+/* Four-note ascending fanfare — celebratory, for unlocking an achievement */
+function sfxAchievement(){ playSequence([[523.25,0,0.1,'triangle',0.14],[659.25,0.09,0.1,'triangle',0.14],[783.99,0.18,0.1,'triangle',0.14],[1046.5,0.27,0.32,'triangle',0.17]]); }
+
+/* ============ BACKGROUND MUSIC PLAYER (user's own library) ============ */
+const musicAudio = new Audio();
+musicAudio.loop = true;
+musicAudio.volume = state.settings.music.volume;
+let musicStatusText = 'No track selected yet — choose one, then press Play.';
+let musicStatusError = false;
+function setMusicStatus(text, isError){
+  musicStatusText = text; musicStatusError = !!isError;
+  const el = document.getElementById('musicStatus');
+  if(el){ el.textContent = text; el.style.color = isError ? 'var(--danger)' : 'var(--text-muted)'; }
+}
+function handleMusicFile(file){
+  if(!file) return;
+  if(!file.type.startsWith('audio/')){ setMusicStatus('That file doesn\'t look like audio — pick an mp3, wav, m4a, or ogg file.', true); return; }
+  setMusicStatus('Loading ' + file.name + '…', false);
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    musicAudio.pause();
+    musicAudio.src = reader.result; // data: URL — more reliably permitted than blob: in sandboxed previews
+    state.settings.music.fileName = file.name;
+    save();
+    playMusicNow();
+  };
+  reader.onerror = ()=>{ setMusicStatus('Could not read that file. Try a different track.', true); };
+  reader.readAsDataURL(file);
+}
+function playMusicNow(){
+  if(!musicAudio.src){ setMusicStatus('Choose a track first.', true); return; }
+  musicAudio.play().then(()=>{
+    setMusicStatus('Now playing: ' + state.settings.music.fileName, false);
+    refreshMusicButton();
+  }).catch(err=>{
+    setMusicStatus('Playback blocked (' + (err.name||'error') + '). Press Play once more — this unlocks audio for the rest of the session.', true);
+    refreshMusicButton();
+  });
+}
+function pauseMusicNow(){ musicAudio.pause(); setMusicStatus('Paused.', false); refreshMusicButton(); }
+function toggleMusicPlay(){ musicAudio.paused ? playMusicNow() : pauseMusicNow(); }
+function refreshMusicButton(){
+  const btn = document.getElementById('musicPlayBtn');
+  if(!btn) return;
+  btn.innerHTML = musicAudio.paused
+    ? `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.play}</span>Play`
+    : `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.pause}</span>Pause`;
+}
+musicAudio.addEventListener('play', refreshMusicButton);
+musicAudio.addEventListener('pause', refreshMusicButton);
+musicAudio.addEventListener('error', ()=>{
+  const codes = {1:'aborted',2:'network error',3:'could not decode this file — try a different format like mp3',4:'format not supported by this browser'};
+  const err = musicAudio.error;
+  setMusicStatus('Couldn\'t play that file' + (err? ' (' + (codes[err.code]||'unknown error') + ')' : '') + '.', true);
+});
+function setMusicAutoplay(on){
+  state.settings.music.enabled = on; save();
+}
+function setMusicVolume(v){ state.settings.music.volume = v; musicAudio.volume = v; save(); }
+function playMusicIfEnabled(){ if(state.settings.music.enabled && musicAudio.src) musicAudio.play().catch(()=>{}); }
+function pauseMusic(){ musicAudio.pause(); }
+function stopMusic(){ musicAudio.pause(); musicAudio.currentTime = 0; }
+function musicPanelHtml(){
+  const m = state.settings.music;
+  return `<div class="card" style="margin-top:16px;">
+    <h3 style="font-size:15px; margin-bottom:6px; display:flex; align-items:center; gap:8px;"><span class="nav-icon" style="width:16px;height:16px;">${ICONS.music}</span>Background Music Player</h3>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Loop a track from your own device while you work. Nothing is uploaded — it's read straight from your files.</p>
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn btn-sm" id="pickMusicBtn"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.music}</span>Choose from library</button>
+      <input type="file" id="musicFile" accept="audio/*" style="display:none;">
+      <button class="btn btn-sm btn-primary" id="musicPlayBtn">
+        <span class="nav-icon" style="width:14px;height:14px;">${musicAudio.paused?ICONS.play:ICONS.pause}</span>${musicAudio.paused?'Play':'Pause'}
+      </button>
+    </div>
+    <p style="font-size:12px; margin-bottom:14px; color:${musicStatusError?'var(--danger)':'var(--text-muted)'};" id="musicStatus">${escapeHtml(m.fileName && !musicStatusError ? 'Track: '+m.fileName : musicStatusText)}</p>
+    <div class="field" style="margin-bottom:12px;"><label>Volume</label><input type="range" id="musicVolume" min="0" max="1" step="0.05" value="${m.volume}"></div>
+    <div class="row" style="justify-content:space-between;">
+      <span style="font-size:13px;">Auto-play when I start a timer</span>
+      <label class="switch"><input type="checkbox" id="musicAutoplay" ${m.enabled?'checked':''}><span class="slider"></span></label>
+    </div>
+  </div>`;
+}
+function wireMusicPanel(){
+  document.getElementById('pickMusicBtn').addEventListener('click', ()=> document.getElementById('musicFile').click());
+  document.getElementById('musicFile').addEventListener('change', e=>{ handleMusicFile(e.target.files[0]); e.target.value=''; });
+  document.getElementById('musicPlayBtn').addEventListener('click', toggleMusicPlay);
+  document.getElementById('musicVolume').addEventListener('input', e=> setMusicVolume(parseFloat(e.target.value)));
+  document.getElementById('musicAutoplay').addEventListener('change', e=> setMusicAutoplay(e.target.checked));
+}
+
 /* ============ DASHBOARD ============ */
 function renderDashboard(main){
   const todayMins = minutesOnDate(todayStr());
@@ -447,10 +603,12 @@ function renderPomodoro(main){
         <button class="btn" id="saveLens">Save Lengths</button>
         <p style="font-size:12px; color:var(--text-muted); margin-top:14px;">Turn on notifications in Settings to get alerted when a sprint or break ends, even if this tab isn't focused.</p>
       </div>
-    </div>`;
+    </div>
+    ${musicPanelHtml()}`;
+  wireMusicPanel();
   document.getElementById('pomoSubject').addEventListener('change', e=> pomo.subjectId = e.target.value);
   document.getElementById('pomoStart').addEventListener('click', togglePomo);
-  document.getElementById('pomoReset').addEventListener('click', ()=>{ stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; updatePomoUI(); });
+  document.getElementById('pomoReset').addEventListener('click', ()=>{ stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; stopMusic(); updatePomoUI(); });
   document.getElementById('pomoSkip').addEventListener('click', ()=>completePomoCycle(true));
   document.getElementById('saveLens').addEventListener('click', ()=>{
     state.settings.workMin = Math.max(1, parseInt(document.getElementById('wLen').value)||25);
@@ -468,12 +626,14 @@ function renderPomodoro(main){
 function togglePomo(){
   pomo.running = !pomo.running;
   if(pomo.running){
+    sfxStart();
+    playMusicIfEnabled();
     pomo.timerId = setInterval(()=>{
       pomo.remaining--;
       if(pomo.remaining <= 0){ completePomoCycle(false); return; }
       updatePomoUI();
     },1000);
-  } else { stopPomoInterval(); }
+  } else { stopPomoInterval(); pauseMusic(); }
   updatePomoUI();
 }
 function stopPomoInterval(){ clearInterval(pomo.timerId); pomo.timerId=null; }
@@ -483,18 +643,21 @@ function completePomoCycle(skipped){
   if(wasWork && !skipped){
     logSession(pomo.subjectId, state.settings.workMin, 'pomodoro');
     pomo.sessionsDone++;
+    sfxWorkComplete();
     notifyUser('Focus sprint complete', 'Nice work — time for a break.');
   } else if(wasWork && skipped){
     pomo.sessionsDone++;
   }
   if(wasWork){
     pomo.mode = (pomo.sessionsDone % state.settings.sessionsBeforeLong === 0) ? 'longBreak' : 'break';
+    if(!skipped) setTimeout(sfxBreakStart, 500);
   } else {
     pomo.mode = 'work';
-    if(!skipped) notifyUser('Break over', 'Ready for another focus sprint?');
+    if(!skipped){ sfxBreakEnd(); notifyUser('Break over', 'Ready for another focus sprint?'); }
   }
   pomo.remaining = pomoDuration(pomo.mode);
   pomo.running = false;
+  pauseMusic();
   updatePomoUI();
   if(currentPage==='pomodoro'){
     document.getElementById('pomoDoneCount').textContent = state.sessions.filter(s=>s.date===todayStr() && s.type==='pomodoro').length;
@@ -532,13 +695,16 @@ function renderStopwatch(main){
         <button class="btn btn-primary" id="swStart">Start</button>
         <button class="btn" id="swStop">Log &amp; Reset</button>
       </div>
-    </div>`;
+    </div>
+    ${musicPanelHtml()}`;
+  wireMusicPanel();
   document.getElementById('swSubject').addEventListener('change', e=> sw.subjectId = e.target.value);
   document.getElementById('swStart').addEventListener('click', toggleSw);
   document.getElementById('swStop').addEventListener('click', ()=>{
     const mins = sw.elapsed/60000;
-    if(mins > 0.05) { logSession(sw.subjectId, mins, 'stopwatch'); toast('Session logged: '+fmtMin(mins)); }
+    if(mins > 0.05) { logSession(sw.subjectId, mins, 'stopwatch'); sfxStopwatchStop(); toast('Session logged: '+fmtMin(mins)); }
     clearInterval(sw.timerId); sw.timerId=null; sw.running=false; sw.elapsed=0;
+    stopMusic();
     updateSwUI();
   });
   updateSwUI();
@@ -546,9 +712,12 @@ function renderStopwatch(main){
 function toggleSw(){
   if(!sw.running){
     sw.running = true; sw.startedAt = Date.now() - sw.elapsed;
+    sfxStart();
+    playMusicIfEnabled();
     sw.timerId = setInterval(()=>{ sw.elapsed = Date.now()-sw.startedAt; updateSwUI(); },500);
   } else {
     sw.running = false; clearInterval(sw.timerId); sw.timerId=null;
+    pauseMusic();
   }
   updateSwUI();
 }
@@ -848,6 +1017,10 @@ function checkAchievements(){
   ACHIEVEMENTS.forEach(a=>{
     if(!state.achievementsUnlocked.includes(a.id) && a.check(state)){
       state.achievementsUnlocked.push(a.id); changed = true;
+      sfxAchievement();
+      if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
+        try{ new Notification('Achievement unlocked', {body:a.title}); }catch(e){}
+      }
       toast('Achievement unlocked: '+a.title);
     }
   });
@@ -910,6 +1083,20 @@ function renderSettings(main){
         <label class="switch"><input type="checkbox" id="notifSwitch" ${state.settings.notifications?'checked':''}><span class="slider"></span></label>
       </div>
       <p style="font-size:12px; color:var(--text-muted);" id="notifStatus"></p>
+      <h3 style="font-size:15px; margin:20px 0 14px;">Sound</h3>
+      <div class="row" style="justify-content:space-between; margin-bottom:10px;">
+        <span style="font-size:14px;">Sound effects (start, finish, break, achievements)</span>
+        <label class="switch"><input type="checkbox" id="sfxSwitch" ${state.settings.sfx?'checked':''}><span class="slider"></span></label>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">These are short tones generated on the spot — no files, no internet needed. Tap any button below to hear it right now.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button class="btn btn-sm" id="testStart"><span class="nav-icon" style="width:13px;height:13px;">${ICONS.speaker}</span>Timer start</button>
+        <button class="btn btn-sm" id="testFinish"><span class="nav-icon" style="width:13px;height:13px;">${ICONS.speaker}</span>Timer finish</button>
+        <button class="btn btn-sm" id="testBreak"><span class="nav-icon" style="width:13px;height:13px;">${ICONS.speaker}</span>Break time</button>
+        <button class="btn btn-sm" id="testResume"><span class="nav-icon" style="width:13px;height:13px;">${ICONS.speaker}</span>Back to focus</button>
+        <button class="btn btn-sm" id="testAch"><span class="nav-icon" style="width:13px;height:13px;">${ICONS.speaker}</span>Achievement</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">Background music you load on the Pomodoro or Stopwatch pages is separate and unaffected by this toggle.</p>
     </div>
     <div class="card">
       <h3 style="font-size:15px; margin-bottom:14px;">Your Data</h3>
@@ -934,6 +1121,13 @@ function renderSettings(main){
     save(); updateNotifStatus();
   });
   updateNotifStatus();
+  document.getElementById('sfxSwitch').addEventListener('change', e=>{ state.settings.sfx = e.target.checked; save(); if(e.target.checked) sfxStart(); });
+  const testSound = (fn)=>{ const wasOn = state.settings.sfx; state.settings.sfx = true; fn(); state.settings.sfx = wasOn; };
+  document.getElementById('testStart').addEventListener('click', ()=>testSound(sfxStart));
+  document.getElementById('testFinish').addEventListener('click', ()=>testSound(sfxWorkComplete));
+  document.getElementById('testBreak').addEventListener('click', ()=>testSound(sfxBreakStart));
+  document.getElementById('testResume').addEventListener('click', ()=>testSound(sfxBreakEnd));
+  document.getElementById('testAch').addEventListener('click', ()=>testSound(sfxAchievement));
   document.getElementById('exportBtn').addEventListener('click', exportData);
   document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('importFile').click());
   document.getElementById('importFile').addEventListener('change', importData);
@@ -962,13 +1156,6 @@ function notifyUser(title, body){
   if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
     try{ new Notification(title, {body}); }catch(e){}
   }
-  try{
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.type='sine'; o.frequency.value = 660; o.connect(g); g.connect(ctx.destination);
-    g.gain.setValueAtTime(0.15, ctx.currentTime);
-    o.start(); o.stop(ctx.currentTime + 0.35);
-  }catch(e){}
   toast(title+' — '+body);
 }
 function exportData(){
@@ -984,7 +1171,7 @@ function importData(e){
   reader.onload = ()=>{
     try{
       const parsed = JSON.parse(reader.result);
-      state = Object.assign(defaultState(), parsed);
+      state = mergeState(parsed);
       save(); applyTheme(); renderNav(); renderMain();
       toast('Data imported');
     }catch(err){ toast('Invalid file'); }
