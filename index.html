@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ledger — Study Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#EEF1EA; --bg-alt:#E4E8DE; --surface:#FFFFFF; --surface-2:#F7F8F3;
@@ -120,8 +120,15 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .timer-controls .btn{ min-width:90px; }
 
 /* Heatmap */
-.heatmap{ display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,1fr); gap:3px; overflow-x:auto; padding-bottom:6px; }
+.heatmap-wrap{ display:inline-block; overflow-x:auto; max-width:100%; padding-bottom:2px; }
+.heatmap-months{ display:grid; gap:3px; margin-left:29px; margin-bottom:4px; }
+.heatmap-months span{ font-size:10px; color:var(--text-muted); width:12px; }
+.heatmap-body{ display:flex; gap:6px; }
+.heatmap-daylabels{ display:grid; grid-template-rows:repeat(7,12px); gap:3px; flex-shrink:0; width:26px; }
+.heatmap-daylabels span{ font-size:9px; color:var(--text-muted); line-height:12px; height:12px; width:100%; text-align:right; }
+.heatmap{ display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,12px); gap:3px; }
 .heat-cell{ width:12px; height:12px; border-radius:3px; background:var(--bg-alt); }
+.heat-cell-empty{ background:transparent !important; }
 .heat-legend{ display:flex; align-items:center; gap:4px; margin-top:10px; font-size:11px; color:var(--text-muted); }
 
 /* Notes */
@@ -140,12 +147,65 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .attach-name{ font-size:9.5px; text-align:center; margin-top:4px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .attach-remove{ position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:var(--danger); color:#fff; border:none; font-size:12px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; }
 
+/* Sticky note — to-do list + daily target, for Pomodoro & Stopwatch */
+.sticky-note{
+  position:relative; margin-top:16px; padding:24px 22px 20px;
+  background:linear-gradient(135deg, #FFF6C6 0%, #FFEA96 100%);
+  color:#4A3A0B; border-radius:3px 3px 22px 3px;
+  transform:rotate(-1.1deg);
+  box-shadow:0 12px 22px -8px rgba(60,45,0,.35), 0 3px 8px rgba(60,45,0,.18);
+  transition:transform .3s cubic-bezier(.34,1.4,.64,1), box-shadow .3s ease;
+  font-family:'Kalam',cursive;
+  animation:stickyDrop .4s cubic-bezier(.34,1.4,.64,1);
+}
+[data-theme="dark"] .sticky-note{
+  background:linear-gradient(135deg, #4E3F0E 0%, #3D3208 100%);
+  color:#F3E3A0;
+  box-shadow:0 12px 22px -8px rgba(0,0,0,.55), 0 3px 8px rgba(0,0,0,.35);
+}
+.sticky-note:hover{ transform:rotate(0deg) translateY(-2px) scale(1.008); box-shadow:0 18px 30px -10px rgba(60,45,0,.4), 0 4px 10px rgba(60,45,0,.2); }
+[data-theme="dark"] .sticky-note:hover{ box-shadow:0 18px 30px -10px rgba(0,0,0,.6), 0 4px 10px rgba(0,0,0,.4); }
+.sticky-note::before{ content:""; position:absolute; right:0; bottom:0; width:0; height:0; border-style:solid; border-width:0 0 24px 24px; border-color:transparent transparent rgba(0,0,0,.14) transparent; border-radius:0 0 22px 0; }
+.sticky-note::after{ content:""; position:absolute; top:-11px; left:50%; transform:translateX(-50%) rotate(-3deg); width:50px; height:20px; background:rgba(255,255,255,.5); border:1px solid rgba(255,255,255,.65); box-shadow:0 3px 5px rgba(0,0,0,.18); border-radius:1px; }
+[data-theme="dark"] .sticky-note::after{ background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.22); }
+@keyframes stickyDrop{ from{ opacity:0; transform:rotate(-1.1deg) translateY(-14px) scale(.97);} to{ opacity:1; transform:rotate(-1.1deg) translateY(0) scale(1);} }
+.sticky-title{ font-family:'Kalam',cursive; font-weight:700; font-size:19px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.sticky-title svg{ width:18px; height:18px; }
+.sticky-target-row{ display:flex; align-items:center; gap:6px; font-size:14px; margin-bottom:8px; flex-wrap:wrap; }
+.sticky-input{ background:rgba(255,255,255,.4); border:none; border-bottom:2px solid rgba(0,0,0,.25); border-radius:2px; padding:3px 6px; font-family:'Kalam',cursive; font-size:14px; color:inherit; }
+[data-theme="dark"] .sticky-input{ background:rgba(0,0,0,.2); border-bottom-color:rgba(255,255,255,.3); }
+.sticky-target-hrs{ width:52px; text-align:center; }
+.sticky-progress-track{ height:9px; border-radius:6px; background:rgba(0,0,0,.14); overflow:hidden; margin-bottom:14px; }
+[data-theme="dark"] .sticky-progress-track{ background:rgba(0,0,0,.35); }
+.sticky-progress-fill{ height:100%; border-radius:6px; background:linear-gradient(90deg,#E08A1E,#F2B33D); transition:width .5s cubic-bezier(.34,1.4,.64,1); }
+.sticky-todo{ display:flex; align-items:center; gap:9px; padding:6px 0; border-bottom:1px dashed rgba(0,0,0,.18); animation:stickyItemIn .22s ease; }
+[data-theme="dark"] .sticky-todo{ border-bottom-color:rgba(255,255,255,.2); }
+@keyframes stickyItemIn{ from{ opacity:0; transform:translateX(-8px);} to{ opacity:1; transform:translateX(0);} }
+.sticky-todo.removing{ animation:stickyItemOut .18s ease forwards; }
+@keyframes stickyItemOut{ to{ opacity:0; transform:translateX(12px) scale(.9); height:0; padding:0; margin:0; border:none;} }
+.sticky-todo input[type=checkbox]{ width:17px; height:17px; accent-color:#B4790A; flex-shrink:0; cursor:pointer; }
+.sticky-todo span{ flex:1; font-size:15.5px; transition:opacity .2s ease; }
+.sticky-todo span.done{ text-decoration:line-through; opacity:.5; }
+.sticky-todo button{ background:none; border:none; color:inherit; opacity:.45; font-size:13px; cursor:pointer; padding:2px 4px; transition:opacity .15s ease, transform .15s ease; }
+.sticky-todo button:hover{ opacity:1; transform:scale(1.15); }
+.sticky-add-row{ display:flex; gap:8px; margin-top:12px; }
+.sticky-add-row input{ flex:1; background:rgba(255,255,255,.4); border:none; border-bottom:2px solid rgba(0,0,0,.25); border-radius:2px; font-family:'Kalam',cursive; font-size:14.5px; color:inherit; padding:5px 7px; }
+[data-theme="dark"] .sticky-add-row input{ background:rgba(0,0,0,.2); border-bottom-color:rgba(255,255,255,.3); }
+.sticky-add-row button{ background:rgba(255,255,255,.45); border:1px solid rgba(0,0,0,.15); color:inherit; font-family:'Kalam',cursive; font-weight:700; border-radius:6px; padding:6px 14px; cursor:pointer; transition:transform .15s ease, background .15s ease; }
+.sticky-add-row button:hover{ transform:translateY(-1px); background:rgba(255,255,255,.65); }
+[data-theme="dark"] .sticky-add-row button{ background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.2); }
+[data-theme="dark"] .sticky-add-row button:hover{ background:rgba(255,255,255,.2); }
+.sticky-empty{ font-size:13.5px; opacity:.65; padding:6px 0; }
+
 /* Achievements */
 .ach-card{ text-align:center; padding:22px 14px; }
 .ach-card .icon{ width:46px; height:46px; border-radius:50%; margin:0 auto 12px; display:flex; align-items:center; justify-content:center; font-family:'Fraunces',serif; font-size:20px; font-weight:700; }
 .ach-card.locked .icon{ background:var(--bg-alt); color:var(--text-muted); }
 .ach-card.unlocked .icon{ background:var(--accent-2-soft); color:var(--accent-2); }
 .ach-card.locked{ opacity:.5; }
+.custom-goal{ transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease; }
+.custom-goal:hover{ transform:translateY(-2px); box-shadow:var(--shadow), 0 6px 14px rgba(0,0,0,.08); }
+.custom-goal.locked:hover{ opacity:.75; }
 .ach-card h4{ font-size:13px; margin-bottom:4px; }
 .ach-card p{ font-size:11px; color:var(--text-muted); }
 
@@ -237,6 +297,7 @@ const ICONS = {
   attach: ISVG(`<path d="M8 12.2V6.8a3.2 3.2 0 0 1 6.4 0V15a4.7 4.7 0 0 1-9.4 0V8"/>`),
   file: ISVG(`<path d="M6 3.5h9l4.5 4.5V19a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5Z"/><path d="M15 3.5V8h4.5"/>`),
   image: ISVG(`<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-5 3.5 3.5L17 11l3.5 4.5"/>`),
+  pin: ISVG(`<path d="M12 3.5v6M8.5 9.5h7l1.5 3H7Z"/><path d="M12 12.5V20.5"/>`),
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -251,7 +312,9 @@ function defaultState(){
     sessions:[], // {id, subjectId, minutes, date, type}
     notes:[], // {id, subjectId, title, body, updatedAt}
     achievementsUnlocked:[],
-    pomodoroCount:0
+    pomodoroCount:0,
+    sticky:{ targetHours:2, todos:[] }, // {id, text, done}
+    customAchievements:[] // {id, title, desc, metric, target, unlocked, unlockedAt}
   };
 }
 let state = load();
@@ -261,6 +324,7 @@ function mergeState(parsed){
   merged.profile = Object.assign(def.profile, parsed.profile||{});
   merged.settings = Object.assign(def.settings, parsed.settings||{});
   merged.settings.music = Object.assign({enabled:false, volume:0.5, fileName:''}, (parsed.settings&&parsed.settings.music)||{});
+  merged.sticky = Object.assign({targetHours:2, todos:[]}, parsed.sticky||{});
   return merged;
 }
 function load(){
@@ -532,6 +596,96 @@ function wireMusicPanel(){
   document.getElementById('musicAutoplay').addEventListener('change', e=> setMusicAutoplay(e.target.checked));
 }
 
+/* ============ STICKY NOTE (to-do list + daily target) — shared by Pomodoro & Stopwatch ============ */
+/* Study minutes "today" = what's actually been logged, PLUS whatever is ticking right
+   now in an active work sprint or stopwatch — otherwise the sticky note only jumps once
+   a session finishes instead of moving while you watch. */
+function liveTodayMinutes(){
+  let mins = minutesOnDate(todayStr());
+  if(pomo.running && pomo.mode==='work') mins += (state.settings.workMin*60 - pomo.remaining)/60;
+  if(sw.running) mins += sw.elapsed/60000;
+  return mins;
+}
+function updateStickyProgressLive(){
+  const fill = document.getElementById('stickyProgressFill');
+  const text = document.getElementById('stickyTodayText');
+  if(!fill && !text) return; // sticky note isn't on screen right now
+  const s = state.sticky;
+  const todayMins = liveTodayMinutes();
+  const targetMins = Math.max(0, s.targetHours) * 60;
+  const pct = targetMins > 0 ? Math.min(100, Math.round(todayMins/targetMins*100)) : 0;
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = `${fmtMin(todayMins)} of ${s.targetHours}h today${pct>=100?' — done! 🎉':''}`;
+}
+function stickyNoteHtml(){
+  const s = state.sticky;
+  const todayMins = liveTodayMinutes();
+  const targetMins = Math.max(0, s.targetHours) * 60;
+  const pct = targetMins > 0 ? Math.min(100, Math.round(todayMins/targetMins*100)) : 0;
+  return `<div class="sticky-note">
+    <div class="sticky-title"><span class="nav-icon" style="width:18px;height:18px;">${ICONS.pin}</span>Today's Focus</div>
+    <div class="sticky-target-row">
+      <span>Target</span>
+      <input type="number" id="stickyTarget" class="sticky-input sticky-target-hrs" min="0" step="0.5" value="${s.targetHours}">
+      <span>hrs</span>
+      <span style="margin-left:auto; font-size:12.5px; opacity:.75;" id="stickyTodayText">${fmtMin(todayMins)} of ${s.targetHours}h today${pct>=100?' — done! 🎉':''}</span>
+    </div>
+    <div class="sticky-progress-track"><div class="sticky-progress-fill" id="stickyProgressFill" style="width:${pct}%;"></div></div>
+    <div id="stickyTodos">
+      ${s.todos.length ? s.todos.map(t=>`<div class="sticky-todo" data-row="${t.id}">
+        <input type="checkbox" data-toggle="${t.id}" ${t.done?'checked':''}>
+        <span class="${t.done?'done':''}">${escapeHtml(t.text)}</span>
+        <button data-remove="${t.id}" title="Remove">✕</button>
+      </div>`).join('') : '<p class="sticky-empty">Nothing on the list yet — what are you tackling today?</p>'}
+    </div>
+    <div class="sticky-add-row">
+      <input type="text" id="stickyNewTodo" placeholder="Add a to-do…">
+      <button id="stickyAddBtn">Add</button>
+    </div>
+  </div>`;
+}
+function refreshStickyNote(){
+  const wrap = document.getElementById('stickyNoteWrap');
+  if(!wrap) return;
+  wrap.innerHTML = stickyNoteHtml();
+  wireStickyNote();
+}
+function wireStickyNote(){
+  document.getElementById('stickyTarget').addEventListener('change', e=>{
+    state.sticky.targetHours = Math.max(0, parseFloat(e.target.value)||0);
+    save(); refreshStickyNote();
+  });
+  document.querySelectorAll('#stickyTodos [data-toggle]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const t = state.sticky.todos.find(x=>x.id===cb.dataset.toggle);
+      if(t){ t.done = cb.checked; save(); }
+      const span = cb.nextElementSibling;
+      if(span) span.classList.toggle('done', cb.checked);
+    });
+  });
+  document.querySelectorAll('#stickyTodos [data-remove]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const row = btn.closest('.sticky-todo');
+      if(row) row.classList.add('removing');
+      setTimeout(()=>{
+        state.sticky.todos = state.sticky.todos.filter(x=>x.id!==btn.dataset.remove);
+        save(); refreshStickyNote();
+      }, 190);
+    });
+  });
+  const addTodo = ()=>{
+    const input = document.getElementById('stickyNewTodo');
+    const text = input.value.trim();
+    if(!text) return;
+    state.sticky.todos.push({id:uid(), text, done:false});
+    save(); input.value='';
+    refreshStickyNote();
+    setTimeout(()=>{ const el = document.getElementById('stickyNewTodo'); if(el) el.focus(); }, 0);
+  };
+  document.getElementById('stickyAddBtn').addEventListener('click', addTodo);
+  document.getElementById('stickyNewTodo').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addTodo(); } });
+}
+
 /* ============ DASHBOARD ============ */
 function renderDashboard(main){
   const todayMins = minutesOnDate(todayStr());
@@ -628,8 +782,12 @@ function renderPomodoro(main){
         <p style="font-size:12px; color:var(--text-muted); margin-top:14px;">Turn on notifications in Settings to get alerted when a sprint or break ends, even if this tab isn't focused.</p>
       </div>
     </div>
-    ${musicPanelHtml()}`;
+    <div class="grid grid-2">
+      <div id="stickyNoteWrap">${stickyNoteHtml()}</div>
+      ${musicPanelHtml()}
+    </div>`;
   wireMusicPanel();
+  wireStickyNote();
   document.getElementById('pomoSubject').addEventListener('change', e=> pomo.subjectId = e.target.value);
   document.getElementById('pomoStart').addEventListener('click', togglePomo);
   document.getElementById('pomoReset').addEventListener('click', ()=>{ stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; stopMusic(); updatePomoUI(); });
@@ -688,6 +846,7 @@ function completePomoCycle(skipped){
   }
 }
 function updatePomoUI(){
+  updateStickyProgressLive();
   if(currentPage!=='pomodoro') return;
   const t = document.getElementById('pomoTime'); if(!t) return;
   const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
@@ -720,8 +879,12 @@ function renderStopwatch(main){
         <button class="btn" id="swStop">Log &amp; Reset</button>
       </div>
     </div>
-    ${musicPanelHtml()}`;
+    <div class="grid grid-2">
+      <div id="stickyNoteWrap">${stickyNoteHtml()}</div>
+      ${musicPanelHtml()}
+    </div>`;
   wireMusicPanel();
+  wireStickyNote();
   document.getElementById('swSubject').addEventListener('change', e=> sw.subjectId = e.target.value);
   document.getElementById('swStart').addEventListener('click', toggleSw);
   document.getElementById('swStop').addEventListener('click', ()=>{
@@ -746,6 +909,7 @@ function toggleSw(){
   updateSwUI();
 }
 function updateSwUI(){
+  updateStickyProgressLive();
   if(currentPage!=='stopwatch') return;
   const el = document.getElementById('swTime'); if(!el) return;
   const totalSec = Math.floor(sw.elapsed/1000);
@@ -884,24 +1048,58 @@ function renderChapters(main){
 }
 
 /* ============ HEATMAP ============ */
+/* Calendar-style heatmap — weekday rows fixed (Sun top → Sat bottom) so day-of-week
+   patterns are visible at a glance, plus month labels along the top. */
 function buildHeatmapGrid(days){
+  const today = new Date();
+  const start = new Date(today); start.setDate(today.getDate() - (days-1));
+  const startDow = start.getDay(); // 0=Sun .. 6=Sat
+  const cells = [];
+  for(let i=0;i<startDow;i++) cells.push(null); // leading blanks so rows align to weekday
+  for(let i=0;i<days;i++){
+    const d = new Date(start); d.setDate(start.getDate()+i);
+    cells.push({date:d, ds:todayStr(d), mins:minutesOnDate(todayStr(d))});
+  }
+  while(cells.length % 7 !== 0) cells.push(null); // trailing blanks to complete last week
+  const totalCols = cells.length / 7;
+  let max = 1;
+  cells.forEach(c=>{ if(c) max = Math.max(max, c.mins); });
+
   const wrap = document.createElement('div');
+  wrap.className = 'heatmap-wrap';
+
+  const monthsRow = document.createElement('div');
+  monthsRow.className = 'heatmap-months';
+  monthsRow.style.gridTemplateColumns = `repeat(${totalCols}, 12px)`;
+  let lastMonth = -1;
+  for(let col=0; col<totalCols; col++){
+    let label = '';
+    for(let row=0; row<7; row++){
+      const c = cells[col*7+row];
+      if(c && c.date.getDate() <= 7 && c.date.getMonth() !== lastMonth){
+        label = c.date.toLocaleString('en-US', {month:'short'});
+        lastMonth = c.date.getMonth();
+        break;
+      }
+    }
+    const span = document.createElement('span');
+    span.textContent = label;
+    monthsRow.appendChild(span);
+  }
+
+  const dayLabels = document.createElement('div');
+  dayLabels.className = 'heatmap-daylabels';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(n=>{ const s = document.createElement('span'); s.textContent = n; dayLabels.appendChild(s); });
+
   const grid = document.createElement('div');
   grid.className = 'heatmap';
-  const today = new Date();
-  const cells = [];
-  let max = 1;
-  for(let i=days-1;i>=0;i--){
-    const d = new Date(today); d.setDate(today.getDate()-i);
-    const ds = todayStr(d);
-    const mins = minutesOnDate(ds);
-    max = Math.max(max, mins);
-    cells.push({ds, mins});
-  }
   cells.forEach(c=>{
     const cell = document.createElement('div');
+    if(!c){ cell.className = 'heat-cell heat-cell-empty'; grid.appendChild(cell); return; }
     cell.className = 'heat-cell';
-    cell.title = `${c.ds}: ${fmtMin(c.mins)}`;
+    const dayName = c.date.toLocaleString('en-US', {weekday:'short'});
+    const dateLabel = c.date.toLocaleString('en-US', {month:'short', day:'numeric'});
+    cell.title = `${dayName}, ${dateLabel}: ${fmtMin(c.mins)}`;
     let level = 0;
     if(c.mins>0) level = 1;
     if(c.mins >= max*0.33) level = 2;
@@ -911,7 +1109,14 @@ function buildHeatmapGrid(days){
     cell.style.background = level===0 ? 'var(--bg-alt)' : `color-mix(in srgb, var(--accent) ${opacities[level]*100}%, var(--bg-alt))`;
     grid.appendChild(cell);
   });
-  wrap.appendChild(grid);
+
+  const body = document.createElement('div');
+  body.className = 'heatmap-body';
+  body.appendChild(dayLabels);
+  body.appendChild(grid);
+
+  wrap.appendChild(monthsRow);
+  wrap.appendChild(body);
   return wrap;
 }
 function renderHeatmap(main){
@@ -1010,10 +1215,13 @@ function renderAttachmentViewer(){
     </div>`;
     document.getElementById('viewerImg').addEventListener('click', ()=>{ viewerState.zoomed = !viewerState.zoomed; renderAttachmentViewer(); });
   } else if(isPdf){
-    const blob = dataUrlToBlob(att.dataUrl);
-    const url = URL.createObjectURL(blob);
-    body.innerHTML = `<iframe src="${url}" class="pdf-frame" title="${escapeHtml(att.name)}"></iframe>
-      <p style="font-size:11px; color:var(--text-muted); margin-top:8px;">Scroll, zoom, and search using your browser's built-in PDF controls. If nothing shows above, use "Open in New Tab" instead.</p>`;
+    body.innerHTML = `<object data="${att.dataUrl}" type="application/pdf" class="pdf-frame">
+        <div style="height:64vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:var(--bg-alt); border-radius:8px; text-align:center; padding:24px;">
+          <span class="nav-icon" style="width:34px; height:34px; color:var(--text-muted);">${ICONS.file}</span>
+          <p style="font-size:13px; color:var(--text-muted); max-width:300px;">This view can't render a PDF preview here. Use Open in New Tab or Download below — your browser will handle it from there.</p>
+        </div>
+      </object>
+      <p style="font-size:11px; color:var(--text-muted); margin-top:8px;">Scroll, zoom, and search using your browser's built-in PDF controls once it loads. If the box above stays blank, use "Open in New Tab" instead.</p>`;
   } else {
     body.innerHTML = `<div class="empty"><h3>No preview available</h3><p>Use Download or Open in New Tab.</p></div>`;
   }
@@ -1228,23 +1436,104 @@ const ACHIEVEMENTS = [
   {id:'chapter_complete', title:'Chapter Closed', desc:'Finish every chapter in a subject', check: s=> s.subjects.some(sub=> sub.chapters.length>0 && sub.chapters.every(c=>c.done))},
   {id:'five_subjects', title:'Renaissance Scholar', desc:'Track 5 different subjects', check: s=> s.subjects.length>=5},
 ];
+/* Metrics available for user-created goals — reuses the same stats the built-in
+   achievements and dashboard already compute, so numbers always agree. */
+const GOAL_METRICS = {
+  totalHours: { label:'Total study hours', unit:'hrs', value: ()=> totalMinutesAll()/60 },
+  streak:     { label:'Study streak (days)', unit:'day streak', value: ()=> currentStreak() },
+  pomodoros:  { label:'Pomodoro sprints completed', unit:'sprints', value: ()=> state.sessions.filter(x=>x.type==='pomodoro').length },
+  notes:      { label:'Notes written', unit:'notes', value: ()=> state.notes.length },
+  subjects:   { label:'Subjects tracked', unit:'subjects', value: ()=> state.subjects.length },
+  chapters:   { label:'Chapters completed', unit:'chapters', value: ()=> state.subjects.reduce((a,s)=>a+s.chapters.filter(c=>c.done).length,0) },
+};
+function formatMetric(metric, value){
+  const v = metric==='totalHours' ? (Math.round(value*10)/10) : Math.round(value);
+  return `${v} ${GOAL_METRICS[metric] ? GOAL_METRICS[metric].unit : ''}`;
+}
+function celebrateGoal(title){
+  sfxAchievement();
+  if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification('Achievement unlocked', {body:title}); }catch(e){}
+  }
+  toast('Achievement unlocked: '+title);
+}
 function checkAchievements(){
   let changed = false;
   ACHIEVEMENTS.forEach(a=>{
     if(!state.achievementsUnlocked.includes(a.id) && a.check(state)){
       state.achievementsUnlocked.push(a.id); changed = true;
-      sfxAchievement();
-      if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
-        try{ new Notification('Achievement unlocked', {body:a.title}); }catch(e){}
-      }
-      toast('Achievement unlocked: '+a.title);
+      celebrateGoal(a.title);
+    }
+  });
+  (state.customAchievements||[]).forEach(g=>{
+    if(g.metric!=='manual' && !g.unlocked && GOAL_METRICS[g.metric] && GOAL_METRICS[g.metric].value() >= g.target){
+      g.unlocked = true; g.unlockedAt = new Date().toISOString(); changed = true;
+      celebrateGoal(g.title);
     }
   });
   if(changed) save();
 }
+function toggleCustomGoal(id){
+  const g = (state.customAchievements||[]).find(x=>x.id===id);
+  if(!g || g.metric!=='manual') return;
+  g.unlocked = !g.unlocked;
+  g.unlockedAt = g.unlocked ? new Date().toISOString() : null;
+  save();
+  if(g.unlocked) celebrateGoal(g.title);
+  renderMain();
+}
+function openAddGoalModal(){
+  openModal(`
+    <button class="close-x" id="closeM">×</button>
+    <h3>New Achievement Goal</h3>
+    <div class="field"><label>Title</label><input type="text" id="goalTitle" placeholder="e.g. Finish Organic Chem chapters"></div>
+    <div class="field"><label>Description (optional)</label><input type="text" id="goalDesc" placeholder="A short note about this goal"></div>
+    <div class="field"><label>How should it unlock?</label>
+      <select id="goalMetric">
+        <option value="manual">I'll mark it complete myself</option>
+        ${Object.entries(GOAL_METRICS).map(([key,m])=>`<option value="${key}">Automatically — ${escapeHtml(m.label)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" id="goalTargetField" style="display:none;">
+      <label id="goalTargetLabel">Target</label>
+      <input type="number" id="goalTarget" min="1" step="1" value="10">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="cancelM">Cancel</button>
+      <button class="btn btn-primary" id="saveGoal">Add Goal</button>
+    </div>
+  `);
+  document.getElementById('closeM').addEventListener('click', closeModal);
+  document.getElementById('cancelM').addEventListener('click', closeModal);
+  const metricSelect = document.getElementById('goalMetric');
+  const targetField = document.getElementById('goalTargetField');
+  const targetLabel = document.getElementById('goalTargetLabel');
+  metricSelect.addEventListener('change', ()=>{
+    if(metricSelect.value === 'manual'){ targetField.style.display = 'none'; }
+    else { targetField.style.display = 'block'; targetLabel.textContent = 'Target — ' + GOAL_METRICS[metricSelect.value].label; }
+  });
+  document.getElementById('saveGoal').addEventListener('click', ()=>{
+    const title = document.getElementById('goalTitle').value.trim();
+    if(!title){ toast('Give your goal a title'); return; }
+    const metric = metricSelect.value;
+    const desc = document.getElementById('goalDesc').value.trim();
+    const goal = {
+      id:uid(), title, desc, metric,
+      target: metric==='manual' ? null : Math.max(1, parseFloat(document.getElementById('goalTarget').value)||1),
+      unlocked:false, unlockedAt:null
+    };
+    state.customAchievements = state.customAchievements || [];
+    state.customAchievements.push(goal);
+    save(); closeModal(); renderMain();
+    checkAchievements();
+  });
+}
 function renderAchievements(main){
-  main.innerHTML = `<div class="page-header"><div><h1>Achievements</h1><p>${state.achievementsUnlocked.length} of ${ACHIEVEMENTS.length} unlocked.</p></div></div>
-  <div class="grid grid-4" id="achGrid"></div>`;
+  const customs = state.customAchievements || [];
+  main.innerHTML = `<div class="page-header"><div><h1>Achievements</h1><p>${state.achievementsUnlocked.length} of ${ACHIEVEMENTS.length} unlocked${customs.length? ` · ${customs.filter(g=>g.unlocked).length} of ${customs.length} of your own goals`:''}.</p></div></div>
+  <div class="grid grid-4" id="achGrid"></div>
+  <div class="page-header" style="margin-top:32px;"><div><h1 style="font-size:19px;">Your Goals</h1><p>Set your own targets — automatic, or mark them off yourself.</p></div><button class="btn btn-primary" id="addGoalBtn">+ Add Goal</button></div>
+  <div class="grid grid-4" id="customGoalGrid"></div>`;
   document.getElementById('achGrid').innerHTML = ACHIEVEMENTS.map(a=>{
     const unlocked = state.achievementsUnlocked.includes(a.id);
     return `<div class="card ach-card ${unlocked?'unlocked':'locked'}">
@@ -1253,6 +1542,38 @@ function renderAchievements(main){
       <p>${escapeHtml(a.desc)}</p>
     </div>`;
   }).join('');
+  const goalGrid = document.getElementById('customGoalGrid');
+  if(customs.length===0){
+    goalGrid.innerHTML = `<div class="card empty" style="grid-column:1/-1;"><h3>No goals yet</h3><p>Set a personal target — like "finish 3 chapters" or "study 20 hours this month."</p></div>`;
+  } else {
+    goalGrid.innerHTML = customs.map(g=>{
+      const isManual = g.metric === 'manual';
+      const progress = isManual ? (g.unlocked ? 'Marked complete' : 'Tap to mark complete') : `${formatMetric(g.metric, GOAL_METRICS[g.metric] ? GOAL_METRICS[g.metric].value() : 0)} / ${formatMetric(g.metric, g.target)}`;
+      return `<div class="card ach-card custom-goal ${g.unlocked?'unlocked':'locked'}" data-goal="${g.id}" style="position:relative; cursor:${isManual?'pointer':'default'};">
+        <button class="icon-btn" data-del-goal="${g.id}" title="Delete goal" style="position:absolute; top:8px; right:8px;">${ICONS.trash}</button>
+        <div class="icon">${g.unlocked?'✓':'?'}</div>
+        <h4>${escapeHtml(g.title)}</h4>
+        <p>${g.desc ? escapeHtml(g.desc) : progress}</p>
+        ${g.desc ? `<p style="font-size:10px; margin-top:4px; opacity:.7;">${progress}</p>` : ''}
+      </div>`;
+    }).join('');
+    goalGrid.querySelectorAll('[data-goal]').forEach(card=>{
+      card.addEventListener('click', (e)=>{
+        if(e.target.closest('[data-del-goal]')) return;
+        toggleCustomGoal(card.dataset.goal);
+      });
+    });
+    goalGrid.querySelectorAll('[data-del-goal]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        confirmAction('Delete this goal? This cannot be undone.', ()=>{
+          state.customAchievements = state.customAchievements.filter(x=>x.id!==btn.dataset.delGoal);
+          save(); renderMain();
+        });
+      });
+    });
+  }
+  document.getElementById('addGoalBtn').addEventListener('click', openAddGoalModal);
 }
 
 /* ============ PROFILE ============ */
