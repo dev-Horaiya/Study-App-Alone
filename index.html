@@ -197,6 +197,36 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 [data-theme="dark"] .sticky-add-row button:hover{ background:rgba(255,255,255,.2); }
 .sticky-empty{ font-size:13.5px; opacity:.65; padding:6px 0; }
 
+/* Floating mini sticky note — appears top-left only while a focus sprint or the
+   stopwatch is actively running, so it's there when you need it and gone when you don't. */
+.floating-sticky{ position:fixed; top:16px; left:16px; z-index:60; display:none; }
+.floating-sticky.show{ display:block; animation:floatIn .3s cubic-bezier(.34,1.4,.64,1); }
+@keyframes floatIn{ from{ opacity:0; transform:translateY(-10px) scale(.95);} to{ opacity:1; transform:translateY(0) scale(1);} }
+.sticky-pill{
+  display:flex; align-items:center; gap:8px; border:none; cursor:pointer;
+  background:linear-gradient(135deg, #FFF6C6, #FFEA96); color:#4A3A0B;
+  border-radius:999px; padding:9px 16px 9px 12px;
+  font-family:'Kalam',cursive; font-size:14px; font-weight:700;
+  box-shadow:0 8px 18px -6px rgba(60,45,0,.4), 0 2px 6px rgba(60,45,0,.2);
+  transition:transform .2s cubic-bezier(.34,1.4,.64,1), box-shadow .2s ease;
+}
+[data-theme="dark"] .sticky-pill{ background:linear-gradient(135deg,#4E3F0E,#3D3208); color:#F3E3A0; box-shadow:0 8px 18px -6px rgba(0,0,0,.6), 0 2px 6px rgba(0,0,0,.4); }
+.sticky-pill:hover{ transform:translateY(-2px) scale(1.04); box-shadow:0 12px 22px -6px rgba(60,45,0,.45), 0 3px 8px rgba(60,45,0,.25); }
+[data-theme="dark"] .sticky-pill:hover{ box-shadow:0 12px 22px -6px rgba(0,0,0,.65), 0 3px 8px rgba(0,0,0,.45); }
+.sticky-pill-pct{ font-variant-numeric:tabular-nums; }
+.sticky-pill-todo{ font-size:11px; opacity:.75; font-family:'Inter',sans-serif; font-weight:600; background:rgba(0,0,0,.08); padding:2px 8px; border-radius:20px; }
+[data-theme="dark"] .sticky-pill-todo{ background:rgba(255,255,255,.14); }
+.sticky-note.sticky-float{ width:280px; margin-top:0; animation:none; transform:rotate(-.6deg); cursor:default; }
+.sticky-note.sticky-float:hover{ transform:rotate(-.6deg) translateY(-1px); }
+.sticky-float-close{
+  position:absolute; top:10px; right:12px; background:rgba(0,0,0,.1); border:none; color:inherit;
+  width:22px; height:22px; border-radius:50%; font-size:15px; line-height:1; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:background .15s ease, transform .15s ease;
+}
+.sticky-float-close:hover{ background:rgba(0,0,0,.2); transform:scale(1.1); }
+[data-theme="dark"] .sticky-float-close{ background:rgba(255,255,255,.14); }
+[data-theme="dark"] .sticky-float-close:hover{ background:rgba(255,255,255,.24); }
+
 /* Achievements */
 .ach-card{ text-align:center; padding:22px 14px; }
 .ach-card .icon{ width:46px; height:46px; border-radius:50%; margin:0 auto 12px; display:flex; align-items:center; justify-content:center; font-family:'Fraunces',serif; font-size:20px; font-weight:700; }
@@ -232,6 +262,15 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .chapter-row input[type=checkbox]{ width:16px; height:16px; accent-color:var(--accent); }
 .chapter-row span{ flex:1; font-size:14px; }
 .chapter-row span.done{ text-decoration:line-through; color:var(--text-muted); }
+.chapter-row a{ flex:1; font-size:14px; color:inherit; text-decoration:none; }
+.chapter-row a:hover{ text-decoration:underline; }
+.chapter-row a.done{ text-decoration:line-through; color:var(--text-muted); }
+.subject-chapters-toggle{ display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12.5px; font-weight:600; color:var(--text-muted); padding:9px 0 3px; border-top:1px solid var(--border); margin-top:10px; user-select:none; transition:color .15s ease; }
+.subject-chapters-toggle:hover{ color:var(--text); }
+.chevron-icon{ width:14px; height:14px; flex-shrink:0; transition:transform .2s ease; }
+.chevron-icon.open{ transform:rotate(180deg); }
+.subject-chapters-panel{ margin-top:8px; animation:panelDrop .2s ease; }
+@keyframes panelDrop{ from{ opacity:0; transform:translateY(-4px);} to{ opacity:1; transform:translateY(0);} }
 
 .subject-card-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
 .icon-btn{ background:none; border:none; color:var(--text-muted); padding:4px; border-radius:6px; }
@@ -262,6 +301,7 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
 </div>
 
 <div class="overlay" id="overlay"><div class="modal" id="modalBody"></div></div>
+<div class="floating-sticky" id="floatingSticky"></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -298,6 +338,8 @@ const ICONS = {
   file: ISVG(`<path d="M6 3.5h9l4.5 4.5V19a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5Z"/><path d="M15 3.5V8h4.5"/>`),
   image: ISVG(`<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-5 3.5 3.5L17 11l3.5 4.5"/>`),
   pin: ISVG(`<path d="M12 3.5v6M8.5 9.5h7l1.5 3H7Z"/><path d="M12 12.5V20.5"/>`),
+  chevron: ISVG(`<path d="M6 9l6 6 6-6"/>`),
+  link: ISVG(`<path d="M9.5 14.5l5-5"/><path d="M8 12.3 6.2 14.1a3 3 0 0 0 4.2 4.2l1.8-1.8"/><path d="M16 11.7l1.8-1.8a3 3 0 0 0-4.2-4.2l-1.8 1.8"/>`),
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -360,6 +402,7 @@ const PAGES = [
   {id:'settings', label:'Settings'},
 ];
 let currentPage = 'dashboard';
+let expandedChapterSubjects = new Set(); // which subject cards have their chapter panel open (Subject Tracker page)
 
 function renderNav(){
   const nav = document.getElementById('nav');
@@ -596,7 +639,10 @@ function wireMusicPanel(){
   document.getElementById('musicAutoplay').addEventListener('change', e=> setMusicAutoplay(e.target.checked));
 }
 
-/* ============ STICKY NOTE (to-do list + daily target) — shared by Pomodoro & Stopwatch ============ */
+/* ============ STICKY NOTE (to-do list + daily target) ============ */
+/* Shared by the embedded card on Pomodoro/Stopwatch AND the floating mini widget —
+   every id takes an optional suffix so both can exist in the DOM at once without clashing. */
+
 /* Study minutes "today" = what's actually been logged, PLUS whatever is ticking right
    now in an active work sprint or stopwatch — otherwise the sticky note only jumps once
    a session finishes instead of moving while you watch. */
@@ -606,32 +652,36 @@ function liveTodayMinutes(){
   if(sw.running) mins += sw.elapsed/60000;
   return mins;
 }
-function updateStickyProgressLive(){
-  const fill = document.getElementById('stickyProgressFill');
-  const text = document.getElementById('stickyTodayText');
-  if(!fill && !text) return; // sticky note isn't on screen right now
+function stickyProgressPct(){
+  const s = state.sticky;
+  const targetMins = Math.max(0, s.targetHours) * 60;
+  const todayMins = liveTodayMinutes();
+  return targetMins > 0 ? Math.min(100, Math.round(todayMins/targetMins*100)) : 0;
+}
+function updateStickyDom(suffix){
+  const fill = document.getElementById('stickyProgressFill'+suffix);
+  const text = document.getElementById('stickyTodayText'+suffix);
+  if(!fill && !text) return;
   const s = state.sticky;
   const todayMins = liveTodayMinutes();
-  const targetMins = Math.max(0, s.targetHours) * 60;
-  const pct = targetMins > 0 ? Math.min(100, Math.round(todayMins/targetMins*100)) : 0;
+  const pct = stickyProgressPct();
   if(fill) fill.style.width = pct + '%';
   if(text) text.textContent = `${fmtMin(todayMins)} of ${s.targetHours}h today${pct>=100?' — done! 🎉':''}`;
 }
-function stickyNoteHtml(){
+function stickyNoteInnerHtml(suffix){
   const s = state.sticky;
   const todayMins = liveTodayMinutes();
-  const targetMins = Math.max(0, s.targetHours) * 60;
-  const pct = targetMins > 0 ? Math.min(100, Math.round(todayMins/targetMins*100)) : 0;
-  return `<div class="sticky-note">
+  const pct = stickyProgressPct();
+  return `
     <div class="sticky-title"><span class="nav-icon" style="width:18px;height:18px;">${ICONS.pin}</span>Today's Focus</div>
     <div class="sticky-target-row">
       <span>Target</span>
-      <input type="number" id="stickyTarget" class="sticky-input sticky-target-hrs" min="0" step="0.5" value="${s.targetHours}">
+      <input type="number" id="stickyTarget${suffix}" class="sticky-input sticky-target-hrs" min="0" step="0.5" value="${s.targetHours}">
       <span>hrs</span>
-      <span style="margin-left:auto; font-size:12.5px; opacity:.75;" id="stickyTodayText">${fmtMin(todayMins)} of ${s.targetHours}h today${pct>=100?' — done! 🎉':''}</span>
+      <span style="margin-left:auto; font-size:12.5px; opacity:.75;" id="stickyTodayText${suffix}">${fmtMin(todayMins)} of ${s.targetHours}h today${pct>=100?' — done! 🎉':''}</span>
     </div>
-    <div class="sticky-progress-track"><div class="sticky-progress-fill" id="stickyProgressFill" style="width:${pct}%;"></div></div>
-    <div id="stickyTodos">
+    <div class="sticky-progress-track"><div class="sticky-progress-fill" id="stickyProgressFill${suffix}" style="width:${pct}%;"></div></div>
+    <div id="stickyTodos${suffix}">
       ${s.todos.length ? s.todos.map(t=>`<div class="sticky-todo" data-row="${t.id}">
         <input type="checkbox" data-toggle="${t.id}" ${t.done?'checked':''}>
         <span class="${t.done?'done':''}">${escapeHtml(t.text)}</span>
@@ -639,51 +689,116 @@ function stickyNoteHtml(){
       </div>`).join('') : '<p class="sticky-empty">Nothing on the list yet — what are you tackling today?</p>'}
     </div>
     <div class="sticky-add-row">
-      <input type="text" id="stickyNewTodo" placeholder="Add a to-do…">
-      <button id="stickyAddBtn">Add</button>
-    </div>
-  </div>`;
+      <input type="text" id="stickyNewTodo${suffix}" placeholder="Add a to-do…">
+      <button id="stickyAddBtn${suffix}">Add</button>
+    </div>`;
 }
-function refreshStickyNote(){
-  const wrap = document.getElementById('stickyNoteWrap');
-  if(!wrap) return;
-  wrap.innerHTML = stickyNoteHtml();
-  wireStickyNote();
+function stickyNoteHtml(suffix){
+  return `<div class="sticky-note">${stickyNoteInnerHtml(suffix||'')}</div>`;
 }
-function wireStickyNote(){
-  document.getElementById('stickyTarget').addEventListener('change', e=>{
+function wireStickyNote(suffix){
+  suffix = suffix || '';
+  const $ = id => document.getElementById(id+suffix);
+  const targetInput = $('stickyTarget');
+  if(targetInput) targetInput.addEventListener('change', e=>{
     state.sticky.targetHours = Math.max(0, parseFloat(e.target.value)||0);
-    save(); refreshStickyNote();
+    save(); refreshAllStickyNotes();
   });
-  document.querySelectorAll('#stickyTodos [data-toggle]').forEach(cb=>{
-    cb.addEventListener('change', ()=>{
-      const t = state.sticky.todos.find(x=>x.id===cb.dataset.toggle);
-      if(t){ t.done = cb.checked; save(); }
-      const span = cb.nextElementSibling;
-      if(span) span.classList.toggle('done', cb.checked);
+  const todosWrap = $('stickyTodos');
+  if(todosWrap){
+    todosWrap.querySelectorAll('[data-toggle]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const t = state.sticky.todos.find(x=>x.id===cb.dataset.toggle);
+        if(t){ t.done = cb.checked; save(); }
+        const span = cb.nextElementSibling;
+        if(span) span.classList.toggle('done', cb.checked);
+      });
     });
-  });
-  document.querySelectorAll('#stickyTodos [data-remove]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const row = btn.closest('.sticky-todo');
-      if(row) row.classList.add('removing');
-      setTimeout(()=>{
-        state.sticky.todos = state.sticky.todos.filter(x=>x.id!==btn.dataset.remove);
-        save(); refreshStickyNote();
-      }, 190);
+    todosWrap.querySelectorAll('[data-remove]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const row = btn.closest('.sticky-todo');
+        if(row) row.classList.add('removing');
+        setTimeout(()=>{
+          state.sticky.todos = state.sticky.todos.filter(x=>x.id!==btn.dataset.remove);
+          save(); refreshAllStickyNotes();
+        }, 190);
+      });
     });
-  });
+  }
   const addTodo = ()=>{
-    const input = document.getElementById('stickyNewTodo');
+    const input = $('stickyNewTodo');
+    if(!input) return;
     const text = input.value.trim();
     if(!text) return;
     state.sticky.todos.push({id:uid(), text, done:false});
     save(); input.value='';
-    refreshStickyNote();
-    setTimeout(()=>{ const el = document.getElementById('stickyNewTodo'); if(el) el.focus(); }, 0);
+    refreshAllStickyNotes();
+    setTimeout(()=>{ const el = $('stickyNewTodo'); if(el) el.focus(); }, 0);
   };
-  document.getElementById('stickyAddBtn').addEventListener('click', addTodo);
-  document.getElementById('stickyNewTodo').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addTodo(); } });
+  const addBtn = $('stickyAddBtn');
+  if(addBtn) addBtn.addEventListener('click', addTodo);
+  const newTodoInput = $('stickyNewTodo');
+  if(newTodoInput) newTodoInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addTodo(); } });
+}
+/* Refreshes whichever sticky note instance(s) are currently on screen — the embedded
+   card and/or the floating widget — after any edit, so they never fall out of sync. */
+function refreshAllStickyNotes(){
+  const wrap = document.getElementById('stickyNoteWrap');
+  if(wrap){ wrap.innerHTML = stickyNoteHtml(''); wireStickyNote(''); }
+  renderFloatingSticky();
+}
+
+/* ---- Floating mini widget: shows top-left only while a focus sprint or the
+   stopwatch is running, minimized to a small pill by default. Click it to expand
+   and configure (target hours, to-dos); click again to tuck it back away. ---- */
+let floatingStickyExpanded = false;
+let floatingStickyWasVisible = false;
+function shouldShowFloatingSticky(){
+  return (pomo.running && pomo.mode==='work') || sw.running;
+}
+function renderFloatingSticky(){
+  const el = document.getElementById('floatingSticky');
+  if(!el) return;
+  if(!shouldShowFloatingSticky()){
+    el.classList.remove('show');
+    el.innerHTML = '';
+    return;
+  }
+  el.classList.add('show');
+  if(!floatingStickyExpanded){
+    const s = state.sticky;
+    const pct = stickyProgressPct();
+    const remaining = s.todos.filter(t=>!t.done).length;
+    el.innerHTML = `<button class="sticky-pill" id="stickyPillBtn" title="Open your sticky note">
+      <span class="nav-icon" style="width:15px;height:15px;">${ICONS.pin}</span>
+      <span class="sticky-pill-pct" id="stickyPillPct">${pct}%</span>
+      ${remaining>0 ? `<span class="sticky-pill-todo">${remaining} to-do${remaining>1?'s':''}</span>` : ''}
+    </button>`;
+    document.getElementById('stickyPillBtn').addEventListener('click', ()=>{ floatingStickyExpanded = true; renderFloatingSticky(); });
+  } else {
+    el.innerHTML = `<div class="sticky-note sticky-float">
+      <button class="sticky-float-close" id="stickyFloatClose" title="Minimize">–</button>
+      ${stickyNoteInnerHtml('Float')}
+    </div>`;
+    document.getElementById('stickyFloatClose').addEventListener('click', ()=>{ floatingStickyExpanded = false; renderFloatingSticky(); });
+    wireStickyNote('Float');
+  }
+}
+function updateFloatingPillLive(){
+  const pctEl = document.getElementById('stickyPillPct');
+  if(!pctEl) return;
+  pctEl.textContent = stickyProgressPct() + '%';
+}
+function updateStickyProgressLive(){
+  updateStickyDom('');
+  const shouldShow = shouldShowFloatingSticky();
+  if(shouldShow !== floatingStickyWasVisible){
+    floatingStickyWasVisible = shouldShow;
+    renderFloatingSticky();
+  } else if(shouldShow){
+    if(floatingStickyExpanded) updateStickyDom('Float');
+    else updateFloatingPillLive();
+  }
 }
 
 /* ============ DASHBOARD ============ */
@@ -921,6 +1036,84 @@ function updateSwUI(){
 }
 
 /* ============ SUBJECTS ============ */
+/* Shared chapter management panel — used by both the Subject Tracker card (collapsible)
+   and the always-open Chapter Progress card, so add/check/delete/link behave identically
+   in either place. */
+function chapterManagePanelHtml(subject){
+  const rows = subject.chapters.length ? subject.chapters.map(c=>{
+    const nameEl = c.link
+      ? `<a href="${escapeHtml(c.link)}" target="_blank" rel="noopener" class="${c.done?'done':''}" title="Open link">${escapeHtml(c.name)}</a>`
+      : `<span class="${c.done?'done':''}">${escapeHtml(c.name)}</span>`;
+    return `<div class="chapter-row">
+      <input type="checkbox" data-ch="${c.id}" ${c.done?'checked':''}>
+      ${nameEl}
+      <button class="icon-btn" data-link-ch="${c.id}" title="${c.link?'Edit link':'Add link'}" style="color:${c.link?'var(--accent)':'inherit'};">${ICONS.link}</button>
+      <button class="icon-btn" data-del-ch="${c.id}" title="Remove chapter">${ICONS.trash}</button>
+    </div>`;
+  }).join('') : '<p style="font-size:12px; color:var(--text-muted); padding:6px 0;">No chapters yet.</p>';
+  return `<div id="chapterPanel-${subject.id}">
+    ${rows}
+    <div class="row" style="margin-top:10px;">
+      <input type="text" placeholder="New chapter name" data-new-ch-input style="flex:1;">
+      <button class="btn btn-sm" data-add-ch>Add</button>
+    </div>
+  </div>`;
+}
+function wireChapterPanel(subject, panelEl){
+  panelEl.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const ch = subject.chapters.find(c=>c.id===cb.dataset.ch);
+      if(ch){ ch.done = cb.checked; save(); checkAchievements(); }
+      renderMain();
+    });
+  });
+  panelEl.querySelectorAll('[data-del-ch]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      subject.chapters = subject.chapters.filter(c=>c.id!==b.dataset.delCh);
+      save(); renderMain();
+    });
+  });
+  panelEl.querySelectorAll('[data-link-ch]').forEach(b=>{
+    b.addEventListener('click', ()=> openChapterLinkModal(subject.id, b.dataset.linkCh));
+  });
+  const addBtn = panelEl.querySelector('[data-add-ch]');
+  if(addBtn){
+    const doAdd = ()=>{
+      const input = panelEl.querySelector('[data-new-ch-input]');
+      const name = input.value.trim();
+      if(!name) return;
+      subject.chapters.push({id:uid(), name, done:false, link:''});
+      save(); renderMain(); checkAchievements();
+    };
+    addBtn.addEventListener('click', doAdd);
+    const input = panelEl.querySelector('[data-new-ch-input]');
+    if(input) input.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } });
+  }
+}
+function openChapterLinkModal(subId, chId){
+  const subj = subjectById(subId);
+  const ch = subj && subj.chapters.find(c=>c.id===chId);
+  if(!ch) return;
+  openModal(`
+    <button class="close-x" id="closeM">×</button>
+    <h3>Chapter Link</h3>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">${escapeHtml(ch.name)}</p>
+    <div class="field"><label>Video or resource link</label><input type="url" id="chLinkInput" value="${escapeHtml(ch.link||'')}" placeholder="https://youtube.com/watch?v=..."></div>
+    <div class="modal-actions">
+      ${ch.link ? '<button class="btn btn-danger" id="removeLinkBtn" style="margin-right:auto;">Remove Link</button>' : ''}
+      <button class="btn" id="cancelM">Cancel</button>
+      <button class="btn btn-primary" id="saveLinkBtn">Save</button>
+    </div>
+  `);
+  document.getElementById('closeM').addEventListener('click', closeModal);
+  document.getElementById('cancelM').addEventListener('click', closeModal);
+  const removeBtn = document.getElementById('removeLinkBtn');
+  if(removeBtn) removeBtn.addEventListener('click', ()=>{ ch.link = ''; save(); closeModal(); renderMain(); });
+  document.getElementById('saveLinkBtn').addEventListener('click', ()=>{
+    ch.link = document.getElementById('chLinkInput').value.trim();
+    save(); closeModal(); renderMain();
+  });
+}
 function renderSubjects(main){
   main.innerHTML = `
     <div class="page-header"><div><h1>Subject Tracker</h1><p>Manage subjects and their class playlists.</p></div><button class="btn btn-primary" id="addSubjectBtn">+ Add Subject</button></div>
@@ -932,6 +1125,7 @@ function renderSubjects(main){
     grid.innerHTML = state.subjects.map(s=>{
       const mins = totalMinutesForSubject(s.id);
       const done = s.chapters.filter(c=>c.done).length, tot = s.chapters.length;
+      const isOpen = expandedChapterSubjects.has(s.id);
       return `<div class="card">
         <div class="subject-card-head">
           <div class="row"><span class="swatch" style="background:${s.color}"></span><h3 style="font-size:16px;">${escapeHtml(s.name)}</h3></div>
@@ -942,6 +1136,11 @@ function renderSubjects(main){
         </div>
         <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">${fmtMin(mins)} logged · ${done}/${tot} chapters</p>
         ${s.youtube ? `<a href="${escapeHtml(s.youtube)}" target="_blank" rel="noopener" class="btn-icon-inline" style="font-size:12px;"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.play}</span>Class playlist</a>` : `<span style="font-size:12px; color:var(--text-muted);">No playlist linked</span>`}
+        <div class="subject-chapters-toggle" data-toggle-chapters="${s.id}">
+          <span class="nav-icon chevron-icon ${isOpen?'open':''}">${ICONS.chevron}</span>
+          <span>Chapters · ${done}/${tot}${isOpen?'':' — click to configure'}</span>
+        </div>
+        ${isOpen ? `<div class="subject-chapters-panel">${chapterManagePanelHtml(s)}</div>` : ''}
       </div>`;
     }).join('');
     grid.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=>openSubjectEditor(b.dataset.edit)));
@@ -951,6 +1150,20 @@ function renderSubjects(main){
         save(); renderMain();
       });
     }));
+    grid.querySelectorAll('[data-toggle-chapters]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const id = el.dataset.toggleChapters;
+        if(expandedChapterSubjects.has(id)) expandedChapterSubjects.delete(id);
+        else expandedChapterSubjects.add(id);
+        renderMain();
+      });
+    });
+    state.subjects.forEach(s=>{
+      if(expandedChapterSubjects.has(s.id)){
+        const panel = document.getElementById('chapterPanel-'+s.id);
+        if(panel) wireChapterPanel(s, panel);
+      }
+    });
   }
   document.getElementById('addSubjectBtn').addEventListener('click', ()=>openSubjectEditor());
 }
@@ -991,7 +1204,7 @@ function openSubjectEditor(id){
 
 /* ============ CHAPTERS ============ */
 function renderChapters(main){
-  main.innerHTML = `<div class="page-header"><div><h1>Chapter Progress</h1><p>Break each subject into chapters and check them off.</p></div></div>
+  main.innerHTML = `<div class="page-header"><div><h1>Chapter Progress</h1><p>Break each subject into chapters, check them off, and link a video or resource to each.</p></div></div>
   <div id="chapterList" class="grid grid-2"></div>`;
   const list = document.getElementById('chapterList');
   if(state.subjects.length===0){
@@ -1007,43 +1220,12 @@ function renderChapters(main){
         <span class="badge">${pct}%</span>
       </div>
       <div class="progress-track" style="margin-bottom:12px;"><div class="progress-fill" style="width:${pct}%; background:${s.color};"></div></div>
-      <div id="chList-${s.id}">
-        ${s.chapters.map(c=>`<div class="chapter-row">
-          <input type="checkbox" data-sub="${s.id}" data-ch="${c.id}" ${c.done?'checked':''}>
-          <span class="${c.done?'done':''}">${escapeHtml(c.name)}</span>
-          <button class="icon-btn" data-del-ch="${s.id}|${c.id}" title="Remove chapter">${ICONS.trash}</button>
-        </div>`).join('') || '<p style="font-size:12px; color:var(--text-muted); padding:6px 0;">No chapters yet.</p>'}
-      </div>
-      <div class="row" style="margin-top:10px;">
-        <input type="text" placeholder="New chapter name" id="newCh-${s.id}" style="flex:1;">
-        <button class="btn btn-sm" data-add-ch="${s.id}">Add</button>
-      </div>
+      ${chapterManagePanelHtml(s)}
     </div>`;
   }).join('');
-  list.querySelectorAll('input[type=checkbox]').forEach(cb=>{
-    cb.addEventListener('change', ()=>{
-      const s = subjectById(cb.dataset.sub);
-      const ch = s.chapters.find(c=>c.id===cb.dataset.ch);
-      ch.done = cb.checked;
-      save(); renderMain(); checkAchievements();
-    });
-  });
-  list.querySelectorAll('[data-del-ch]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      const [subId, chId] = b.dataset.delCh.split('|');
-      const s = subjectById(subId);
-      s.chapters = s.chapters.filter(c=>c.id!==chId);
-      save(); renderMain();
-    });
-  });
-  list.querySelectorAll('[data-add-ch]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      const input = document.getElementById('newCh-'+b.dataset.addCh);
-      const name = input.value.trim();
-      if(!name) return;
-      subjectById(b.dataset.addCh).chapters.push({id:uid(), name, done:false});
-      save(); renderMain();
-    });
+  state.subjects.forEach(s=>{
+    const panel = document.getElementById('chapterPanel-'+s.id);
+    if(panel) wireChapterPanel(s, panel);
   });
 }
 
