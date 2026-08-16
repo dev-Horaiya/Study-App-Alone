@@ -338,6 +338,7 @@ const ICONS = {
   file: ISVG(`<path d="M6 3.5h9l4.5 4.5V19a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5Z"/><path d="M15 3.5V8h4.5"/>`),
   image: ISVG(`<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-5 3.5 3.5L17 11l3.5 4.5"/>`),
   pin: ISVG(`<path d="M12 3.5v6M8.5 9.5h7l1.5 3H7Z"/><path d="M12 12.5V20.5"/>`),
+  pip: ISVG(`<rect x="3.5" y="4.5" width="17" height="14" rx="2"/><rect x="12.5" y="12" width="6.5" height="4.7" rx="1" fill="currentColor" stroke="none"/>`),
   chevron: ISVG(`<path d="M6 9l6 6 6-6"/>`),
   link: ISVG(`<path d="M9.5 14.5l5-5"/><path d="M8 12.3 6.2 14.1a3 3 0 0 0 4.2 4.2l1.8-1.8"/><path d="M16 11.7l1.8-1.8a3 3 0 0 0-4.2-4.2l-1.8 1.8"/>`),
 };
@@ -913,10 +914,96 @@ function updatePageChrome(){
   } else if(!status){
     lastBgNotifyMinute = null;
   }
+  if(pipActive){
+    if(!status){ document.exitPictureInPicture && document.exitPictureInPicture().catch(()=>{}); }
+    else drawPipFrame();
+  }
 }
 document.addEventListener('visibilitychange', ()=>{
   if(document.hidden){ lastBgNotifyMinute = null; updatePageChrome(); }
 });
+
+/* ============ FLOATING TIMER (Picture-in-Picture) ============ */
+/* This is the piece that actually survives minimizing the whole browser window — the tab
+   title and favicon badge only help while some part of the browser is visible on screen.
+   PiP renders the countdown onto a canvas, streams that canvas into a hidden video, and
+   asks the browser to float that video above every other window, including a minimized one. */
+let pipCanvas = null, pipCtx = null, pipVideo = null, pipActive = false;
+function pipSupported(){ return typeof document.pictureInPictureEnabled === 'boolean' && document.pictureInPictureEnabled; }
+function ensurePipAssets(){
+  if(pipCanvas) return;
+  pipCanvas = document.createElement('canvas');
+  pipCanvas.width = 320; pipCanvas.height = 180;
+  pipCtx = pipCanvas.getContext('2d');
+  pipVideo = document.createElement('video');
+  pipVideo.muted = true; pipVideo.playsInline = true;
+  pipVideo.style.display = 'none';
+  pipVideo.srcObject = pipCanvas.captureStream(2); // 2fps is plenty for a digit clock
+  document.body.appendChild(pipVideo);
+  pipVideo.addEventListener('leavepictureinpicture', ()=>{ pipActive = false; updatePipButtons(); });
+}
+function pipDrawData(){
+  if(pomo.running){
+    const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
+    const s = (pomo.remaining%60).toString().padStart(2,'0');
+    const label = pomo.mode==='work' ? 'Focus Sprint' : pomo.mode==='longBreak' ? 'Long Break' : 'Short Break';
+    return { big:`${m}:${s}`, label, color: pomo.mode==='work' ? '#4BCBA8' : '#F0B35C' };
+  }
+  if(sw.running){
+    const totalSec = Math.floor(sw.elapsed/1000);
+    const h = Math.floor(totalSec/3600).toString().padStart(2,'0');
+    const m = Math.floor((totalSec%3600)/60).toString().padStart(2,'0');
+    const s = (totalSec%60).toString().padStart(2,'0');
+    return { big: h!=='00' ? `${h}:${m}:${s}` : `${m}:${s}`, label:'Stopwatch', color:'#7C8CF0' };
+  }
+  return null;
+}
+function drawPipFrame(){
+  if(!pipCtx) return;
+  const d = pipDrawData();
+  const w = pipCanvas.width, h = pipCanvas.height;
+  pipCtx.fillStyle = '#12160F';
+  pipCtx.fillRect(0,0,w,h);
+  pipCtx.fillStyle = (d && d.color) || '#4BCBA8';
+  pipCtx.fillRect(0,0,6,h);
+  pipCtx.fillStyle = 'rgba(255,255,255,.68)';
+  pipCtx.font = '600 15px Inter, sans-serif';
+  pipCtx.textAlign = 'left'; pipCtx.textBaseline = 'top';
+  pipCtx.fillText('LEDGER · ' + (d ? d.label.toUpperCase() : 'IDLE'), 24, 18);
+  pipCtx.fillStyle = '#fff';
+  pipCtx.font = '700 54px "IBM Plex Mono", monospace';
+  pipCtx.textBaseline = 'middle';
+  pipCtx.fillText(d ? d.big : '— : —', 24, h/2 + 16);
+}
+async function togglePip(){
+  if(!pipSupported()){
+    toast('Picture-in-Picture isn\'t supported in this browser.');
+    return;
+  }
+  if(document.pictureInPictureElement){
+    try{ await document.exitPictureInPicture(); }catch(e){}
+    return;
+  }
+  ensurePipAssets();
+  drawPipFrame();
+  try{
+    await pipVideo.play();
+    await pipVideo.requestPictureInPicture();
+    pipActive = true;
+    updatePipButtons();
+  }catch(e){
+    toast('Could not open the floating timer — your browser may have blocked it.');
+  }
+}
+function updatePipButtons(){
+  ['pomoPipBtn','swPipBtn'].forEach(id=>{
+    const btn = document.getElementById(id);
+    if(!btn) return;
+    btn.innerHTML = pipActive
+      ? `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.pip}</span>Close Floating Timer`
+      : `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.pip}</span>Pop-out Timer`;
+  });
+}
 
 /* ============ POMODORO ============ */
 let pomo = {
@@ -953,7 +1040,8 @@ function renderPomodoro(main){
           <button class="btn" id="pomoReset">Reset</button>
           <button class="btn" id="pomoSkip">Skip</button>
         </div>
-        <p style="font-size:12px; color:var(--text-muted);">Completed sprints today: <span class="mono" id="pomoDoneCount">${state.sessions.filter(s=>s.date===todayStr() && s.type==='pomodoro').length}</span></p>
+        ${pipSupported() ? `<button class="btn btn-sm" id="pomoPipBtn" style="margin-top:10px;"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.pip}</span>Pop-out Timer</button>` : ''}
+        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">Completed sprints today: <span class="mono" id="pomoDoneCount">${state.sessions.filter(s=>s.date===todayStr() && s.type==='pomodoro').length}</span></p>
       </div>
       <div class="card">
         <h3 style="font-size:16px; margin-bottom:14px;">Session Lengths</h3>
@@ -975,6 +1063,8 @@ function renderPomodoro(main){
   document.getElementById('pomoStart').addEventListener('click', togglePomo);
   document.getElementById('pomoReset').addEventListener('click', ()=>{ stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; stopMusic(); updatePomoUI(); });
   document.getElementById('pomoSkip').addEventListener('click', ()=>completePomoCycle(true));
+  const pomoPipBtn = document.getElementById('pomoPipBtn');
+  if(pomoPipBtn) pomoPipBtn.addEventListener('click', togglePip);
   document.getElementById('saveLens').addEventListener('click', ()=>{
     state.settings.workMin = Math.max(1, parseInt(document.getElementById('wLen').value)||25);
     state.settings.breakMin = Math.max(1, parseInt(document.getElementById('bLen').value)||5);
@@ -987,6 +1077,7 @@ function renderPomodoro(main){
   });
   if(pomo.remaining === undefined) pomo.remaining = pomoDuration('work');
   updatePomoUI();
+  updatePipButtons();
 }
 function togglePomo(){
   pomo.running = !pomo.running;
@@ -1061,6 +1152,7 @@ function renderStopwatch(main){
         <button class="btn btn-primary" id="swStart">Start</button>
         <button class="btn" id="swStop">Log &amp; Reset</button>
       </div>
+      ${pipSupported() ? `<button class="btn btn-sm" id="swPipBtn" style="margin-top:10px;"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.pip}</span>Pop-out Timer</button>` : ''}
     </div>
     <div class="grid grid-2">
       <div id="stickyNoteWrap">${stickyNoteHtml()}</div>
@@ -1077,7 +1169,10 @@ function renderStopwatch(main){
     stopMusic();
     updateSwUI();
   });
+  const swPipBtn = document.getElementById('swPipBtn');
+  if(swPipBtn) swPipBtn.addEventListener('click', togglePip);
   updateSwUI();
+  updatePipButtons();
 }
 function toggleSw(){
   if(!sw.running){
