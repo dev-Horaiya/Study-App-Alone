@@ -850,6 +850,74 @@ function renderDashboard(main){
   document.getElementById('goNote').addEventListener('click', ()=>{ currentPage='notes'; renderNav(); renderMain(); setTimeout(openNoteEditor,0); });
 }
 
+/* ============ PAGE CHROME (tab title, favicon badge, background notification) ============ */
+/* Keeps a timer visible even when you're not looking at it — switch tabs, minimize the
+   window, or navigate to a different page in the app, and you can still tell a timer is
+   running from the tab title and a colored dot on the favicon. If a timer is running when
+   the tab actually loses focus, one background notification confirms it, refreshed every
+   minute rather than spammed every second. */
+let faviconBadgeState = null; // 'work' | 'break' | 'stopwatch' | null
+function ensureFaviconLink(){
+  let link = document.getElementById('appFavicon');
+  if(!link){ link = document.createElement('link'); link.id = 'appFavicon'; link.rel = 'icon'; document.head.appendChild(link); }
+  return link;
+}
+function drawFavicon(badge){
+  const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1F6F5C';
+  ctx.beginPath(); ctx.arc(32,32,30,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '700 34px Georgia, serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('L', 32, 35);
+  if(badge){
+    const colors = { work:'#4BCBA8', break:'#F0B35C', stopwatch:'#7C8CF0' };
+    ctx.beginPath(); ctx.arc(50,15,13,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(50,15,10,0,Math.PI*2); ctx.fillStyle = colors[badge] || colors.work; ctx.fill();
+  }
+  return canvas.toDataURL('image/png');
+}
+function setFaviconBadge(badge){
+  if(badge === faviconBadgeState) return; // only redraw on an actual state change
+  faviconBadgeState = badge;
+  ensureFaviconLink().href = drawFavicon(badge);
+}
+function activeTimerStatus(){
+  if(pomo.running){
+    const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
+    const sec = (pomo.remaining%60).toString().padStart(2,'0');
+    const label = pomo.mode==='work' ? 'Focus' : pomo.mode==='longBreak' ? 'Long Break' : 'Break';
+    return { badge: pomo.mode==='work'?'work':'break', title:`${m}:${sec} · ${label} — Ledger`, body:`${label} — ${m}:${sec} remaining` };
+  }
+  if(sw.running){
+    const totalSec = Math.floor(sw.elapsed/1000);
+    const h = Math.floor(totalSec/3600).toString().padStart(2,'0');
+    const m = Math.floor((totalSec%3600)/60).toString().padStart(2,'0');
+    const s = (totalSec%60).toString().padStart(2,'0');
+    return { badge:'stopwatch', title:`${h}:${m}:${s} · Stopwatch — Ledger`, body:`Stopwatch running — ${h}:${m}:${s} elapsed` };
+  }
+  return null;
+}
+let lastBgNotifyMinute = null;
+function updatePageChrome(){
+  const status = activeTimerStatus();
+  document.title = status ? status.title : 'Ledger — Study Tracker';
+  setFaviconBadge(status ? status.badge : null);
+  if(status && document.hidden && state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
+    const curMin = Math.floor(Date.now()/60000);
+    if(lastBgNotifyMinute !== curMin){
+      lastBgNotifyMinute = curMin;
+      try{ new Notification(status.title.replace(' — Ledger',''), { body: status.body, tag:'ledger-timer-status', silent:true }); }catch(e){}
+    }
+  } else if(!status){
+    lastBgNotifyMinute = null;
+  }
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ lastBgNotifyMinute = null; updatePageChrome(); }
+});
+
 /* ============ POMODORO ============ */
 let pomo = {
   mode:'work', // work | break | longBreak
@@ -962,6 +1030,7 @@ function completePomoCycle(skipped){
 }
 function updatePomoUI(){
   updateStickyProgressLive();
+  updatePageChrome();
   if(currentPage!=='pomodoro') return;
   const t = document.getElementById('pomoTime'); if(!t) return;
   const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
@@ -975,7 +1044,6 @@ function updatePomoUI(){
   const frac = 1 - (pomo.remaining/total);
   ring.setAttribute('stroke-dashoffset', (circumference*(1-frac)).toFixed(1));
   ring.setAttribute('stroke', pomo.mode==='work' ? 'var(--accent)' : 'var(--accent-2)');
-  document.title = pomo.running ? `${t.textContent} · Ledger` : 'Ledger — Study Tracker';
 }
 
 /* ============ STOPWATCH ============ */
@@ -1025,6 +1093,7 @@ function toggleSw(){
 }
 function updateSwUI(){
   updateStickyProgressLive();
+  updatePageChrome();
   if(currentPage!=='stopwatch') return;
   const el = document.getElementById('swTime'); if(!el) return;
   const totalSec = Math.floor(sw.elapsed/1000);
@@ -1802,6 +1871,7 @@ function renderSettings(main){
         <label class="switch"><input type="checkbox" id="notifSwitch" ${state.settings.notifications?'checked':''}><span class="slider"></span></label>
       </div>
       <p style="font-size:12px; color:var(--text-muted);" id="notifStatus"></p>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">With this on, switching tabs or minimizing the window while a timer runs sends a quiet reminder that it's still going. Either way, the browser tab's title and icon always show a live countdown so you can check at a glance.</p>
       <h3 style="font-size:15px; margin:20px 0 14px;">Sound</h3>
       <div class="row" style="justify-content:space-between; margin-bottom:10px;">
         <span style="font-size:14px;">Sound effects (start, finish, break, achievements)</span>
