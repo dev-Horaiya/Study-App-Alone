@@ -3,29 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ledger — Study Tracker</title>
+<title>Studium — Study Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#EEF1EA; --bg-alt:#E4E8DE; --surface:#FFFFFF; --surface-2:#F7F8F3;
-  --text:#1B231D; --text-muted:#5B6459; --border:#D7DCCF;
-  --accent:#1F6F5C; --accent-soft:#1F6F5C1a; --accent-2:#C77E22; --accent-2-soft:#C77E221a;
-  --danger:#B24A2C; --danger-soft:#B24A2C1a;
-  --shadow:0 1px 2px rgba(27,35,29,0.06), 0 4px 16px rgba(27,35,29,0.06);
+  --bg:#F4F2EC; --bg-alt:#EAE7DD; --surface:#FFFFFF; --surface-2:#F7F5EF;
+  --text:#241F16; --text-muted:#6B6455; --border:#E1DCCD;
+  --accent:#3F7F6F; --accent-soft:#3F7F6F1a; --accent-2:#B4893A; --accent-2-soft:#B4893A22;
+  --danger:#B2503A; --danger-soft:#B2503A1a;
+  --shadow:0 1px 2px rgba(30,25,15,0.05), 0 2px 8px rgba(30,25,15,0.05);
+  --shadow-hover:0 1px 2px rgba(30,25,15,0.06), 0 6px 16px rgba(30,25,15,0.07);
+  --card-bg:#FFFFFF; --card-border:#E5E0D2;
+  --illo-opacity:0; --vignette-color:rgba(30,25,15,0.04);
   --radius:10px;
 }
 [data-theme="dark"]{
-  --bg:#101512; --bg-alt:#161C18; --surface:#1B2320; --surface-2:#202A25;
-  --text:#EDEFE9; --text-muted:#9AA79E; --border:#2B362F;
-  --accent:#4BCBA8; --accent-soft:#4BCBA826; --accent-2:#F0B35C; --accent-2-soft:#F0B35C26;
-  --danger:#E2734A; --danger-soft:#E2734A26;
-  --shadow:0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  --bg:#14150F; --bg-alt:#191B13; --surface:#211F17; --surface-2:#282619;
+  --text:#F1EDE0; --text-muted:#9C9A8A; --border:#332F22;
+  --accent:#4C8F7E; --accent-soft:#4C8F7E22; --accent-2:#E3B34D; --accent-2-soft:#E3B34D26;
+  --danger:#D9765C; --danger-soft:#D9765C22;
+  --shadow:0 1px 2px rgba(0,0,0,0.3), 0 3px 10px rgba(0,0,0,0.25);
+  --shadow-hover:0 1px 3px rgba(0,0,0,0.35), 0 8px 22px rgba(0,0,0,0.32);
+  --card-bg:#211F17; --card-border:#332F22;
+  --illo-opacity:0.55; --vignette-color:rgba(0,0,0,0.45);
 }
 *{box-sizing:border-box; margin:0; padding:0;}
 body{
   font-family:'Inter',sans-serif; background:var(--bg); color:var(--text);
-  min-height:100vh; transition:background .25s ease, color .25s ease;
+  min-height:100vh; transition:background .3s ease, color .3s ease;
 }
 h1,h2,h3{ font-family:'Fraunces',serif; font-weight:600; letter-spacing:-0.01em; }
 .mono{ font-family:'IBM Plex Mono',monospace; }
@@ -33,14 +39,39 @@ button{ font-family:'Inter',sans-serif; cursor:pointer; }
 input,select,textarea{ font-family:'Inter',sans-serif; }
 a{ color:var(--accent); }
 
+/* Ambient background — a quiet "desk at night" atmosphere: a lamp, a stack of books
+   with glasses, and a plant sprig tucked into the corners, plus a soft vignette. All
+   fixed, pointer-events:none, and confined to the margins outside the card grid so they
+   never sit under text. Only visible in dark mode — a lamp-lit desk is a night idea. */
+.ambient-bg{ position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
+.ambient-bg .vignette{ position:absolute; inset:0; background:radial-gradient(circle at 50% 34%, transparent 0%, transparent 58%, var(--vignette-color) 100%); }
+.ambient-bg .illo{ position:absolute; opacity:var(--illo-opacity); transition:opacity .4s ease; }
+.ambient-bg .illo-lamp{ left:-18px; bottom:-14px; width:230px; height:auto; }
+.ambient-bg .illo-books{ right:-14px; bottom:-10px; width:210px; height:auto; }
+.ambient-bg .illo-plant{ right:-10px; top:-14px; width:150px; height:auto; }
+@media (max-width:900px){
+  .ambient-bg .illo-lamp{ width:150px; }
+  .ambient-bg .illo-books{ width:140px; }
+  .ambient-bg .illo-plant{ width:100px; }
+}
+@media (max-width:760px){ .ambient-bg .illo{ display:none; } } /* keep phones light — fewer painted layers */
+
+/* Smooth, subtle page transition — content settles in on every navigation, nothing showy */
+@keyframes pageFadeIn{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:translateY(0); } }
+.page-fade-in{ animation:pageFadeIn .28s ease; }
+@media (prefers-reduced-motion: reduce){ .page-fade-in{ animation:none; } }
+
 /* Layout */
 .app{ display:flex; min-height:100vh; }
 .sidebar{
-  width:220px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border);
+  width:220px; flex-shrink:0; background:var(--card-bg); border-right:1px solid var(--card-border);
   display:flex; flex-direction:column; padding:24px 14px; position:sticky; top:0; height:100vh; overflow-y:auto;
 }
 .brand{ padding:6px 10px 20px 10px; }
-.brand .mark{ font-family:'Fraunces',serif; font-size:22px; font-weight:700; }
+.brand .mark{ font-family:'Fraunces',serif; font-size:22px; font-weight:700; display:flex; align-items:center; gap:8px; }
+.brand-mark-icon{ width:22px; height:22px; color:var(--accent); flex-shrink:0; }
+.mobile-topbar-title{ display:flex; align-items:center; gap:7px; }
+.mobile-topbar-title .brand-mark-icon{ width:19px; height:19px; }
 .brand .sub{ font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; margin-top:2px;}
 nav{ display:flex; flex-direction:column; gap:2px; flex:1; }
 .nav-btn{
@@ -60,21 +91,62 @@ nav{ display:flex; flex-direction:column; gap:2px; flex:1; }
 .btn-icon-inline{ display:inline-flex; align-items:center; gap:6px; }
 .sidebar-foot{ padding-top:10px; border-top:1px solid var(--border); margin-top:10px; }
 
-.main{ flex:1; min-width:0; padding:32px 40px 80px; }
-.page-header{ margin-bottom:24px; display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+.main{ flex:1; min-width:0; padding:36px 44px 84px; }
+.page-header{ margin-bottom:28px; display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap;}
 .page-header h1{ font-size:28px; }
 .page-header p{ color:var(--text-muted); font-size:14px; margin-top:4px; }
 
-.card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); }
-.grid{ display:grid; gap:16px; }
+.card{
+  background:var(--card-bg); border:1px solid var(--card-border); border-radius:var(--radius); padding:20px;
+  box-shadow:var(--shadow); transition:transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.card:hover{ transform:translateY(-1px); box-shadow:var(--shadow-hover); border-color:var(--accent-soft); }
+.grid{ display:grid; gap:18px; }
 .grid-2{ grid-template-columns:1fr 1fr; }
 .grid-3{ grid-template-columns:repeat(3,1fr); }
 .grid-4{ grid-template-columns:repeat(4,1fr); }
 @media (max-width:900px){ .grid-2,.grid-3,.grid-4{ grid-template-columns:1fr; } .main{padding:20px;} .sidebar{width:180px;} }
 
-.stat{ display:flex; flex-direction:column; gap:6px; }
-.stat .label{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); }
-.stat .value{ font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600; }
+/* Mobile nav: sidebar becomes an off-canvas drawer under a hamburger menu, and the
+   Pomodoro dial shrinks so it never overflows a narrow screen. */
+.mobile-topbar{ display:none; }
+.hamburger-btn{ display:none; }
+.sidebar-backdrop{ display:none; }
+@media (max-width:760px){
+  .mobile-topbar{
+    display:flex; align-items:center; gap:12px; padding:12px 16px;
+    background:var(--card-bg); border-bottom:1px solid var(--card-border);
+    position:sticky; top:0; z-index:55;
+  }
+  .hamburger-btn{
+    display:flex; align-items:center; justify-content:center; width:36px; height:36px;
+    border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); flex-shrink:0;
+  }
+  .hamburger-btn svg{ width:18px; height:18px; }
+  .mobile-topbar-title{ font-family:'Fraunces',serif; font-weight:700; font-size:17px; }
+  .app{ display:block; }
+  .sidebar{
+    position:fixed; top:0; left:0; height:100vh; width:240px; max-width:80vw;
+    transform:translateX(-100%); transition:transform .25s cubic-bezier(.4,0,.2,1);
+    z-index:70;
+  }
+  .sidebar.open{ transform:translateX(0); box-shadow:12px 0 32px rgba(0,0,0,.28); }
+  .sidebar-backdrop.open{ display:block; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:65; animation:fadeIn .2s ease; }
+  @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+  .main{ padding:16px; }
+}
+@media (max-width:480px){
+  .dial{ width:230px; height:230px; }
+  .dial-time{ font-size:36px; }
+  .timer-controls{ flex-wrap:wrap; justify-content:center; }
+  .timer-controls .btn{ min-width:0; padding:9px 14px; font-size:12.5px; }
+  .sw-time-display{ font-size:34px !important; }
+  .grid-4{ grid-template-columns:repeat(2,1fr); }
+}
+
+.stat{ display:flex; flex-direction:column; gap:7px; }
+.stat .label{ font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); font-weight:600; }
+.stat .value{ font-family:'IBM Plex Mono',monospace; font-size:28px; font-weight:600; color:var(--text); letter-spacing:-0.01em; }
 
 .btn{ border:1px solid var(--border); background:var(--surface-2); color:var(--text); padding:9px 16px; border-radius:8px; font-size:13px; font-weight:600; transition:all .15s ease;}
 .btn:hover{ border-color:var(--accent); }
@@ -109,13 +181,21 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .subject-chip{ display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:8px; background:var(--surface-2); border:1px solid var(--border); }
 .swatch{ width:10px; height:10px; border-radius:3px; flex-shrink:0; }
 
-/* Pomodoro */
-.timer-wrap{ display:flex; flex-direction:column; align-items:center; gap:20px; padding:20px 0; }
-.dial{ position:relative; width:260px; height:260px; }
+/* Pomodoro — given visual prominence: a larger dial, a bolder digit face, and a quiet
+   static halo behind the ring. No motion here — this is the one element that should
+   read as "the point of the screen" the instant you land on the page. */
+.timer-wrap{ display:flex; flex-direction:column; align-items:center; gap:22px; padding:28px 0 20px; }
+.dial{ position:relative; width:288px; height:288px; }
+.dial::before{
+  content:""; position:absolute; inset:-18px; border-radius:50%;
+  background:radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+  z-index:-1;
+}
 .dial svg{ transform:rotate(-90deg); width:100%; height:100%; }
 .dial-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-.dial-time{ font-family:'IBM Plex Mono',monospace; font-size:44px; font-weight:600; }
-.dial-mode{ font-size:12px; text-transform:uppercase; letter-spacing:.1em; color:var(--text-muted); margin-top:4px; }
+.dial-time{ font-family:'IBM Plex Mono',monospace; font-size:50px; font-weight:600; letter-spacing:-0.01em; }
+.sw-time-display{ font-size:52px; }
+.dial-mode{ font-size:12px; text-transform:uppercase; letter-spacing:.14em; color:var(--text-muted); margin-top:6px; font-weight:600; }
 .timer-controls{ display:flex; gap:10px; }
 .timer-controls .btn{ min-width:90px; }
 
@@ -250,7 +330,7 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 /* Modal */
 .overlay{ position:fixed; inset:0; background:rgba(10,14,11,.5); display:none; align-items:center; justify-content:center; z-index:50; padding:20px;}
 .overlay.open{ display:flex; }
-.modal{ background:var(--surface); border-radius:12px; padding:24px; width:100%; max-width:440px; border:1px solid var(--border); max-height:85vh; overflow-y:auto; transition:max-width .15s ease;}
+.modal{ background:var(--card-bg); border-radius:12px; padding:24px; width:100%; max-width:440px; border:1px solid var(--card-border); max-height:85vh; overflow-y:auto; transition:max-width .15s ease; box-shadow:var(--shadow-hover);}
 .modal.modal-lg{ max-width:820px; }
 .pdf-frame{ width:100%; height:64vh; border:1px solid var(--border); border-radius:8px; background:#fff; display:block; }
 .modal h3{ margin-bottom:16px; }
@@ -286,10 +366,60 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
 </head>
 <body>
 
+<div class="ambient-bg" aria-hidden="true">
+  <svg class="illo illo-lamp" viewBox="0 0 220 260" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="lampGlow" cx="50%" cy="35%" r="60%">
+        <stop offset="0%" stop-color="#F0C878" stop-opacity="0.55"/>
+        <stop offset="100%" stop-color="#F0C878" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="lampShade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#D9A54B"/>
+        <stop offset="100%" stop-color="#B4823A"/>
+      </linearGradient>
+    </defs>
+    <ellipse cx="95" cy="95" rx="90" ry="90" fill="url(#lampGlow)"/>
+    <rect x="20" y="238" width="90" height="10" rx="4" fill="#5A4A2E"/>
+    <rect x="55" y="150" width="10" height="90" rx="4" fill="#6B5836"/>
+    <path d="M60 150 C60 110, 95 100, 95 70" stroke="#6B5836" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <circle cx="95" cy="70" r="8" fill="#7C6A45"/>
+    <path d="M65 70 L125 70 L112 108 L78 108 Z" fill="url(#lampShade)"/>
+    <path d="M70 108 L120 108 L150 200 L40 200 Z" fill="#F0C878" opacity="0.16"/>
+  </svg>
+  <svg class="illo illo-books" viewBox="0 0 210 170" xmlns="http://www.w3.org/2000/svg">
+    <g>
+      <rect x="15" y="128" width="180" height="18" rx="3" fill="#8A6A3C"/>
+      <rect x="22" y="106" width="166" height="22" rx="3" fill="#4C8F7E"/>
+      <rect x="30" y="80" width="150" height="26" rx="3" fill="#B2503A" transform="rotate(-1 105 93)"/>
+      <rect x="35" y="52" width="140" height="28" rx="3" fill="#B4893A" transform="rotate(1.5 105 66)"/>
+    </g>
+    <g transform="translate(72 34) rotate(-8)">
+      <circle cx="0" cy="10" r="15" fill="none" stroke="#DED7C4" stroke-width="4"/>
+      <circle cx="42" cy="10" r="15" fill="none" stroke="#DED7C4" stroke-width="4"/>
+      <path d="M15 10h12" stroke="#DED7C4" stroke-width="4"/>
+      <path d="M-15 8 L-30 2" stroke="#DED7C4" stroke-width="4" stroke-linecap="round"/>
+      <path d="M57 8 L72 2" stroke="#DED7C4" stroke-width="4" stroke-linecap="round"/>
+    </g>
+  </svg>
+  <svg class="illo illo-plant" viewBox="0 0 150 170" xmlns="http://www.w3.org/2000/svg">
+    <path d="M55 170 L60 110 Q75 108 88 90 M60 130 Q45 122 38 100 M64 95 Q80 70 78 40 M64 95 Q50 78 52 55" stroke="#4C8F7E" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <path d="M45 150h40l-5 20H50Z" fill="#6B5836"/>
+  </svg>
+  <div class="vignette"></div>
+</div>
+
+<div class="mobile-topbar" id="mobileTopbar">
+  <button class="hamburger-btn" id="hamburgerBtn" aria-label="Open menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <span class="mobile-topbar-title"><svg class="brand-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/></svg>Studium</span>
+</div>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
 <div class="app">
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="mark">Ledger</div>
+      <div class="mark"><svg class="brand-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/></svg>Studium</div>
       <div class="sub">Study Tracker</div>
     </div>
     <nav id="nav"></nav>
@@ -306,10 +436,11 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
 
 <script>
 /* ============ STATE ============ */
-const STORAGE_KEY = 'ledgerStudyTrackerData';
-const SUBJECT_COLORS = ['#1F6F5C','#C77E22','#5C6BC0','#B24A2C','#2E8B8B','#8E5FB0','#3F7D3A','#A0522D'];
+const STORAGE_KEY = 'studiumStudyTrackerData';
+const LEGACY_STORAGE_KEYS = ['ledgerStudyTrackerData']; // pre-rename key — migrated automatically on load
+const SUBJECT_COLORS = ['#4FB6A8','#B7A279','#7B92D9','#C4735C','#5E9E9C','#9A87C4','#7FA867','#B98D6A'];
 
-/* Hand-picked line-icon set, drawn to match Ledger's editorial/analog feel:
+/* Hand-picked line-icon set, drawn to match Studium's editorial/analog feel:
    thin uniform stroke, rounded joins, no fills — reads like ink on a page. */
 const ISVG = (inner)=> `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 const ICONS = {
@@ -339,6 +470,7 @@ const ICONS = {
   image: ISVG(`<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-5 3.5 3.5L17 11l3.5 4.5"/>`),
   pin: ISVG(`<path d="M12 3.5v6M8.5 9.5h7l1.5 3H7Z"/><path d="M12 12.5V20.5"/>`),
   pip: ISVG(`<rect x="3.5" y="4.5" width="17" height="14" rx="2"/><rect x="12.5" y="12" width="6.5" height="4.7" rx="1" fill="currentColor" stroke="none"/>`),
+  logo: ISVG(`<path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/>`),
   chevron: ISVG(`<path d="M6 9l6 6 6-6"/>`),
   link: ISVG(`<path d="M9.5 14.5l5-5"/><path d="M8 12.3 6.2 14.1a3 3 0 0 0 4.2 4.2l1.8-1.8"/><path d="M16 11.7l1.8-1.8a3 3 0 0 0-4.2-4.2l-1.8 1.8"/>`),
 };
@@ -372,7 +504,14 @@ function mergeState(parsed){
 }
 function load(){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw){
+      // Migrate data saved under the app's old name so nobody loses their history.
+      for(const legacyKey of LEGACY_STORAGE_KEYS){
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if(legacyRaw){ raw = legacyRaw; localStorage.setItem(STORAGE_KEY, raw); break; }
+      }
+    }
     if(!raw) return defaultState();
     const parsed = JSON.parse(raw);
     return mergeState(parsed);
@@ -409,9 +548,19 @@ function renderNav(){
   const nav = document.getElementById('nav');
   nav.innerHTML = PAGES.map(p => `<button class="nav-btn ${p.id===currentPage?'active':''}" data-page="${p.id}"><span class="nav-icon">${ICONS[p.id]}</span>${p.label}</button>`).join('');
   nav.querySelectorAll('.nav-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ currentPage = btn.dataset.page; renderNav(); renderMain(); });
+    btn.addEventListener('click', ()=>{ currentPage = btn.dataset.page; renderNav(); renderMain(); toggleMobileSidebar(false); });
   });
 }
+function toggleMobileSidebar(force){
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if(!sidebar || !backdrop) return;
+  const open = force !== undefined ? force : !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', open);
+  backdrop.classList.toggle('open', open);
+}
+document.getElementById('hamburgerBtn').addEventListener('click', ()=> toggleMobileSidebar());
+document.getElementById('sidebarBackdrop').addEventListener('click', ()=> toggleMobileSidebar(false));
 
 function renderMain(){
   const main = document.getElementById('main');
@@ -423,6 +572,11 @@ function renderMain(){
   };
   main.innerHTML = '';
   renderers[currentPage](main);
+  // Purely cosmetic: a gentle fade-and-settle on every page swap. Restart the animation
+  // by removing the class, forcing reflow, then re-adding it.
+  main.classList.remove('page-fade-in');
+  void main.offsetWidth;
+  main.classList.add('page-fade-in');
 }
 
 /* ============ HELPERS ============ */
@@ -857,7 +1011,7 @@ function renderDashboard(main){
    running from the tab title and a colored dot on the favicon. If a timer is running when
    the tab actually loses focus, one background notification confirms it, refreshed every
    minute rather than spammed every second. */
-let faviconBadgeState = null; // 'work' | 'break' | 'stopwatch' | null
+let faviconBadgeState = 'unset'; // sentinel so the branded favicon draws even before any badge state is set
 function ensureFaviconLink(){
   let link = document.getElementById('appFavicon');
   if(!link){ link = document.createElement('link'); link.id = 'appFavicon'; link.rel = 'icon'; document.head.appendChild(link); }
@@ -871,7 +1025,7 @@ function drawFavicon(badge){
   ctx.fillStyle = '#fff';
   ctx.font = '700 34px Georgia, serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('L', 32, 35);
+  ctx.fillText('S', 32, 35);
   if(badge){
     const colors = { work:'#4BCBA8', break:'#F0B35C', stopwatch:'#7C8CF0' };
     ctx.beginPath(); ctx.arc(50,15,13,0,Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill();
@@ -889,27 +1043,27 @@ function activeTimerStatus(){
     const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
     const sec = (pomo.remaining%60).toString().padStart(2,'0');
     const label = pomo.mode==='work' ? 'Focus' : pomo.mode==='longBreak' ? 'Long Break' : 'Break';
-    return { badge: pomo.mode==='work'?'work':'break', title:`${m}:${sec} · ${label} — Ledger`, body:`${label} — ${m}:${sec} remaining` };
+    return { badge: pomo.mode==='work'?'work':'break', title:`${m}:${sec} · ${label} — Studium`, body:`${label} — ${m}:${sec} remaining` };
   }
   if(sw.running){
     const totalSec = Math.floor(sw.elapsed/1000);
     const h = Math.floor(totalSec/3600).toString().padStart(2,'0');
     const m = Math.floor((totalSec%3600)/60).toString().padStart(2,'0');
     const s = (totalSec%60).toString().padStart(2,'0');
-    return { badge:'stopwatch', title:`${h}:${m}:${s} · Stopwatch — Ledger`, body:`Stopwatch running — ${h}:${m}:${s} elapsed` };
+    return { badge:'stopwatch', title:`${h}:${m}:${s} · Stopwatch — Studium`, body:`Stopwatch running — ${h}:${m}:${s} elapsed` };
   }
   return null;
 }
 let lastBgNotifyMinute = null;
 function updatePageChrome(){
   const status = activeTimerStatus();
-  document.title = status ? status.title : 'Ledger — Study Tracker';
+  document.title = status ? status.title : 'Studium — Study Tracker';
   setFaviconBadge(status ? status.badge : null);
   if(status && document.hidden && state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
     const curMin = Math.floor(Date.now()/60000);
     if(lastBgNotifyMinute !== curMin){
       lastBgNotifyMinute = curMin;
-      try{ new Notification(status.title.replace(' — Ledger',''), { body: status.body, tag:'ledger-timer-status', silent:true }); }catch(e){}
+      try{ new Notification(status.title.replace(' — Studium',''), { body: status.body, tag:'studium-timer-status', silent:true }); }catch(e){}
     }
   } else if(!status){
     lastBgNotifyMinute = null;
@@ -920,8 +1074,100 @@ function updatePageChrome(){
   }
 }
 document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden){ lastBgNotifyMinute = null; updatePageChrome(); }
+  if(document.hidden){
+    lastBgNotifyMinute = null;
+    updatePageChrome();
+  } else {
+    // Coming back into view — resync from real elapsed time immediately rather than
+    // waiting for the next (possibly throttled) tick, so nothing looks frozen or stale.
+    syncPomoRemaining();
+    if(sw.running) sw.elapsed = Date.now() - sw.startedAt;
+    updatePomoUI();
+    updateSwUI();
+  }
 });
+
+/* ============ LIVE TIMER PERSISTENCE ============ */
+/* Session minutes only get logged to state.sessions when a Pomodoro sprint completes or
+   the stopwatch is stopped — so a running timer's progress was invisible to localStorage
+   the whole time it was ticking. If the tab reloaded, crashed, or was closed mid-session,
+   that time was gone. This snapshots the running timer every tick (and on every explicit
+   action) to a separate key, and replays real elapsed wall-clock time back in on load. */
+const LIVE_TIMER_KEY = 'studiumLiveTimerState';
+const LEGACY_LIVE_TIMER_KEYS = ['ledgerLiveTimerState'];
+function saveLiveTimerState(){
+  try{
+    localStorage.setItem(LIVE_TIMER_KEY, JSON.stringify({
+      pomo: { mode:pomo.mode, remaining:pomo.remaining, running:pomo.running, subjectId:pomo.subjectId, sessionsDone:pomo.sessionsDone },
+      sw: { elapsed:sw.elapsed, running:sw.running, subjectId:sw.subjectId },
+      savedAt: Date.now()
+    }));
+  }catch(e){}
+}
+function clearLiveTimerState(){ try{ localStorage.removeItem(LIVE_TIMER_KEY); }catch(e){} }
+function restoreLiveTimerState(){
+  let data;
+  try{
+    let raw = localStorage.getItem(LIVE_TIMER_KEY);
+    if(!raw){
+      for(const legacyKey of LEGACY_LIVE_TIMER_KEYS){
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if(legacyRaw){ raw = legacyRaw; break; }
+      }
+    }
+    if(!raw) return;
+    data = JSON.parse(raw);
+  }catch(e){ return; }
+  const now = Date.now();
+  if(data.pomo){
+    pomo.mode = data.pomo.mode || 'work';
+    pomo.subjectId = data.pomo.subjectId || '';
+    pomo.sessionsDone = data.pomo.sessionsDone || 0;
+    if(data.pomo.running){
+      const elapsedSec = Math.floor((now - data.savedAt)/1000);
+      const GRACE_SEC = 120; // generous allowance for a normal refresh/restart gap
+      if(elapsedSec > data.pomo.remaining + GRACE_SEC){
+        // The gap is far bigger than the timer itself could explain — the browser was
+        // actually closed for a while, not just refreshed. Don't fabricate a finished
+        // session for time you weren't there for; bank only what was genuinely studied
+        // before it closed, then reset to a fresh, paused state.
+        if(pomo.mode==='work'){
+          const studiedMin = (pomoDuration('work') - data.pomo.remaining) / 60;
+          if(studiedMin >= 1) logSession(pomo.subjectId, studiedMin, 'pomodoro-partial');
+        }
+        pomo.remaining = pomoDuration(pomo.mode);
+        pomo.running = false;
+      } else {
+        pomo.remaining = data.pomo.remaining - elapsedSec;
+        if(pomo.remaining <= 0){
+          // Finished naturally while briefly away — settle it as a completed sprint.
+          pomo.remaining = 0; pomo.running = false;
+          completePomoCycle(false);
+        } else {
+          pomo.running = true;
+          startPomoInterval();
+        }
+      }
+    } else {
+      pomo.remaining = data.pomo.remaining;
+      pomo.running = false;
+    }
+  }
+  if(data.sw){
+    sw.subjectId = data.sw.subjectId || '';
+    if(data.sw.running){
+      sw.elapsed = data.sw.elapsed + (now - data.savedAt);
+      sw.running = true;
+      sw.startedAt = now - sw.elapsed;
+      startSwInterval();
+    } else {
+      sw.elapsed = data.sw.elapsed;
+      sw.running = false;
+    }
+  }
+  updatePomoUI();
+  updateSwUI();
+}
 
 /* ============ FLOATING TIMER (Picture-in-Picture) ============ */
 /* This is the piece that actually survives minimizing the whole browser window — the tab
@@ -933,11 +1179,21 @@ function pipSupported(){ return typeof document.pictureInPictureEnabled === 'boo
 function ensurePipAssets(){
   if(pipCanvas) return;
   pipCanvas = document.createElement('canvas');
-  pipCanvas.width = 320; pipCanvas.height = 180;
+  pipCanvas.width = 170; pipCanvas.height = 60;
   pipCtx = pipCanvas.getContext('2d');
   pipVideo = document.createElement('video');
   pipVideo.muted = true; pipVideo.playsInline = true;
-  pipVideo.style.display = 'none';
+  pipVideo.setAttribute('playsinline', ''); pipVideo.setAttribute('muted', '');
+  pipVideo.width = 170; pipVideo.height = 60;
+  // Kept off-screen but NOT display:none — a display:none video won't reliably decode
+  // frames or accept requestPictureInPicture() in most browsers.
+  pipVideo.style.position = 'fixed';
+  pipVideo.style.left = '-9999px';
+  pipVideo.style.top = '0';
+  pipVideo.style.width = '170px';
+  pipVideo.style.height = '60px';
+  pipVideo.style.opacity = '0';
+  pipVideo.style.pointerEvents = 'none';
   pipVideo.srcObject = pipCanvas.captureStream(2); // 2fps is plenty for a digit clock
   document.body.appendChild(pipVideo);
   pipVideo.addEventListener('leavepictureinpicture', ()=>{ pipActive = false; updatePipButtons(); });
@@ -958,22 +1214,31 @@ function pipDrawData(){
   }
   return null;
 }
+function roundRectPath(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
 function drawPipFrame(){
   if(!pipCtx) return;
   const d = pipDrawData();
   const w = pipCanvas.width, h = pipCanvas.height;
+  pipCtx.clearRect(0,0,w,h);
+  roundRectPath(pipCtx, 2, 2, w-4, h-4, (h-4)/2);
   pipCtx.fillStyle = '#12160F';
-  pipCtx.fillRect(0,0,w,h);
+  pipCtx.fill();
+  pipCtx.beginPath();
+  pipCtx.arc(22, h/2, 7, 0, Math.PI*2);
   pipCtx.fillStyle = (d && d.color) || '#4BCBA8';
-  pipCtx.fillRect(0,0,6,h);
-  pipCtx.fillStyle = 'rgba(255,255,255,.68)';
-  pipCtx.font = '600 15px Inter, sans-serif';
-  pipCtx.textAlign = 'left'; pipCtx.textBaseline = 'top';
-  pipCtx.fillText('LEDGER · ' + (d ? d.label.toUpperCase() : 'IDLE'), 24, 18);
+  pipCtx.fill();
   pipCtx.fillStyle = '#fff';
-  pipCtx.font = '700 54px "IBM Plex Mono", monospace';
-  pipCtx.textBaseline = 'middle';
-  pipCtx.fillText(d ? d.big : '— : —', 24, h/2 + 16);
+  pipCtx.font = '700 24px "IBM Plex Mono", monospace';
+  pipCtx.textAlign = 'left'; pipCtx.textBaseline = 'middle';
+  pipCtx.fillText(d ? d.big : '—:—', 38, h/2 + 1);
 }
 async function togglePip(){
   if(!pipSupported()){
@@ -992,7 +1257,7 @@ async function togglePip(){
     pipActive = true;
     updatePipButtons();
   }catch(e){
-    toast('Could not open the floating timer — your browser may have blocked it.');
+    toast('Floating timer blocked: ' + (e.name || 'error') + (e.message ? ' — ' + e.message : ''));
   }
 }
 function updatePipButtons(){
@@ -1009,7 +1274,7 @@ function updatePipButtons(){
 let pomo = {
   mode:'work', // work | break | longBreak
   remaining: state.settings.workMin*60,
-  running:false, timerId:null, subjectId:'', sessionsDone:0
+  running:false, timerId:null, subjectId:'', sessionsDone:0, targetEndAt:null
 };
 function pomoDuration(mode){
   if(mode==='work') return state.settings.workMin*60;
@@ -1059,9 +1324,20 @@ function renderPomodoro(main){
     </div>`;
   wireMusicPanel();
   wireStickyNote();
-  document.getElementById('pomoSubject').addEventListener('change', e=> pomo.subjectId = e.target.value);
+  document.getElementById('pomoSubject').addEventListener('change', e=>{ pomo.subjectId = e.target.value; saveLiveTimerState(); });
   document.getElementById('pomoStart').addEventListener('click', togglePomo);
-  document.getElementById('pomoReset').addEventListener('click', ()=>{ stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; stopMusic(); updatePomoUI(); });
+  document.getElementById('pomoReset').addEventListener('click', ()=>{
+    // Credit whatever was genuinely studied before resetting — don't throw away real
+    // progress just because the sprint wasn't finished.
+    if(pomo.mode==='work'){
+      const studiedMin = (pomoDuration('work') - pomo.remaining) / 60;
+      if(studiedMin >= 1){
+        logSession(pomo.subjectId, studiedMin, 'pomodoro-partial');
+        toast('Logged ' + fmtMin(studiedMin) + ' before resetting');
+      }
+    }
+    stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; pomo.targetEndAt=null; stopMusic(); updatePomoUI();
+  });
   document.getElementById('pomoSkip').addEventListener('click', ()=>completePomoCycle(true));
   const pomoPipBtn = document.getElementById('pomoPipBtn');
   if(pomoPipBtn) pomoPipBtn.addEventListener('click', togglePip);
@@ -1079,17 +1355,31 @@ function renderPomodoro(main){
   updatePomoUI();
   updatePipButtons();
 }
+function syncPomoRemaining(){
+  if(pomo.running && pomo.targetEndAt){
+    pomo.remaining = Math.max(0, Math.round((pomo.targetEndAt - Date.now())/1000));
+  }
+}
+function startPomoInterval(){
+  stopPomoInterval();
+  pomo.targetEndAt = Date.now() + pomo.remaining*1000;
+  pomo.timerId = setInterval(()=>{
+    syncPomoRemaining();
+    if(pomo.remaining <= 0){ completePomoCycle(false); return; }
+    updatePomoUI();
+  },1000);
+}
 function togglePomo(){
   pomo.running = !pomo.running;
   if(pomo.running){
     sfxStart();
     playMusicIfEnabled();
-    pomo.timerId = setInterval(()=>{
-      pomo.remaining--;
-      if(pomo.remaining <= 0){ completePomoCycle(false); return; }
-      updatePomoUI();
-    },1000);
-  } else { stopPomoInterval(); pauseMusic(); }
+    startPomoInterval();
+  } else {
+    syncPomoRemaining(); // lock in the true value at the exact instant of pausing
+    stopPomoInterval();
+    pauseMusic();
+  }
   updatePomoUI();
 }
 function stopPomoInterval(){ clearInterval(pomo.timerId); pomo.timerId=null; }
@@ -1113,6 +1403,7 @@ function completePomoCycle(skipped){
   }
   pomo.remaining = pomoDuration(pomo.mode);
   pomo.running = false;
+  pomo.targetEndAt = null;
   pauseMusic();
   updatePomoUI();
   if(currentPage==='pomodoro'){
@@ -1122,6 +1413,7 @@ function completePomoCycle(skipped){
 function updatePomoUI(){
   updateStickyProgressLive();
   updatePageChrome();
+  saveLiveTimerState();
   if(currentPage!=='pomodoro') return;
   const t = document.getElementById('pomoTime'); if(!t) return;
   const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
@@ -1147,7 +1439,7 @@ function renderStopwatch(main){
         <label>Subject</label>
         <select id="swSubject">${subjectOptions(sw.subjectId)}</select>
       </div>
-      <div class="dial-time mono" id="swTime" style="font-size:52px;">00:00:00</div>
+      <div class="dial-time mono sw-time-display" id="swTime">00:00:00</div>
       <div class="timer-controls">
         <button class="btn btn-primary" id="swStart">Start</button>
         <button class="btn" id="swStop">Log &amp; Reset</button>
@@ -1160,7 +1452,7 @@ function renderStopwatch(main){
     </div>`;
   wireMusicPanel();
   wireStickyNote();
-  document.getElementById('swSubject').addEventListener('change', e=> sw.subjectId = e.target.value);
+  document.getElementById('swSubject').addEventListener('change', e=>{ sw.subjectId = e.target.value; saveLiveTimerState(); });
   document.getElementById('swStart').addEventListener('click', toggleSw);
   document.getElementById('swStop').addEventListener('click', ()=>{
     const mins = sw.elapsed/60000;
@@ -1174,12 +1466,16 @@ function renderStopwatch(main){
   updateSwUI();
   updatePipButtons();
 }
+function startSwInterval(){
+  clearInterval(sw.timerId);
+  sw.timerId = setInterval(()=>{ sw.elapsed = Date.now()-sw.startedAt; updateSwUI(); },500);
+}
 function toggleSw(){
   if(!sw.running){
     sw.running = true; sw.startedAt = Date.now() - sw.elapsed;
     sfxStart();
     playMusicIfEnabled();
-    sw.timerId = setInterval(()=>{ sw.elapsed = Date.now()-sw.startedAt; updateSwUI(); },500);
+    startSwInterval();
   } else {
     sw.running = false; clearInterval(sw.timerId); sw.timerId=null;
     pauseMusic();
@@ -1189,6 +1485,7 @@ function toggleSw(){
 function updateSwUI(){
   updateStickyProgressLive();
   updatePageChrome();
+  saveLiveTimerState();
   if(currentPage!=='stopwatch') return;
   const el = document.getElementById('swTime'); if(!el) return;
   const totalSec = Math.floor(sw.elapsed/1000);
@@ -2018,7 +2315,11 @@ function renderSettings(main){
   document.getElementById('resetBtn').addEventListener('click', ()=>{
     confirmAction('This will permanently delete all subjects, sessions, notes, and settings stored in this browser. Continue?', ()=>{
       localStorage.removeItem(STORAGE_KEY);
+      clearLiveTimerState();
+      stopPomoInterval(); clearInterval(sw.timerId); sw.timerId=null;
+      pomo.running=false; sw.running=false; sw.elapsed=0; pomo.mode='work';
       state = defaultState();
+      pomo.remaining = pomoDuration('work');
       applyTheme(); renderNav(); renderMain();
       toast('All data reset');
     }, 'Reset everything');
@@ -2046,7 +2347,7 @@ function exportData(){
   const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'ledger-study-data.json'; a.click();
+  a.href = url; a.download = 'studium-study-data.json'; a.click();
   URL.revokeObjectURL(url);
 }
 function importData(e){
@@ -2078,6 +2379,7 @@ document.getElementById('darkToggleBtn').addEventListener('click', ()=> setDarkM
 
 /* ============ INIT ============ */
 applyTheme();
+restoreLiveTimerState();
 renderNav();
 renderMain();
 checkAchievements();
