@@ -315,6 +315,16 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .rank-banner .rank-num{ font-family:'IBM Plex Mono',monospace; font-size:22px; font-weight:700; color:var(--accent-2); text-shadow:0 0 14px var(--accent-2-soft); }
 .rank-banner .rank-text{ flex:1; font-size:13px; color:var(--text-muted); }
 .rank-banner .rank-text strong{ color:var(--text); }
+.comp-card{ padding:18px; }
+.comp-standings{ display:flex; flex-direction:column; gap:2px; margin-bottom:12px; }
+.comp-row{ display:flex; align-items:center; gap:10px; padding:7px 4px; border-radius:8px; }
+.comp-row.lb-me{ background:var(--accent-soft); }
+.comp-name{ flex:1; font-size:13.5px; font-weight:600; }
+.comp-points{ font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:700; }
+.comp-points.pos{ color:var(--accent); }
+.comp-points.neg{ color:var(--danger); }
+.comp-settled-note{ font-size:12px; color:var(--text-muted); text-align:center; padding:6px 0 2px; }
+.comp-winner-note{ font-size:13px; font-weight:600; color:var(--accent-2); text-align:center; padding:6px 0 2px; }
 
 /* Floating mini sticky note — appears top-left only while a focus sprint or the
    stopwatch is actively running, so it's there when you need it and gone when you don't. */
@@ -501,6 +511,7 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
 <div class="floating-sticky" id="floatingSticky"></div>
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============ STATE ============ */
 const STORAGE_KEY = 'studiumStudyTrackerData';
@@ -539,6 +550,8 @@ const ICONS = {
   pip: ISVG(`<rect x="3.5" y="4.5" width="17" height="14" rx="2"/><rect x="12.5" y="12" width="6.5" height="4.7" rx="1" fill="currentColor" stroke="none"/>`),
   logo: ISVG(`<path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/>`),
   leaderboard: ISVG(`<path d="M8.5 21h7"/><path d="M12 17.5V21"/><path d="M6 4.5h12v5a6 6 0 0 1-12 0Z"/><path d="M6 6.5H3.5a2 2 0 0 0 0 4H6"/><path d="M18 6.5h2.5a2 2 0 0 1 0 4H18"/>`),
+  swords: ISVG(`<path d="M4 4l7 7"/><path d="M4 4l2.5 -0.3L7 6l4.5 4.5"/><path d="M20 4l-7 7"/><path d="M20 4l-2.5 -0.3L17 6l-4.5 4.5"/><path d="M6 13l-2.5 6.5L10 17l3-3"/><path d="M18 13l2.5 6.5L14 17l-3-3"/>`),
+  personPlus: ISVG(`<circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20c1-3.8 3.6-5.8 6.5-5.8s5.5 2 6.5 5.8"/><path d="M18 8.5h4M20 6.5v4"/>`),
   chevron: ISVG(`<path d="M6 9l6 6 6-6"/>`),
   link: ISVG(`<path d="M9.5 14.5l5-5"/><path d="M8 12.3 6.2 14.1a3 3 0 0 0 4.2 4.2l1.8-1.8"/><path d="M16 11.7l1.8-1.8a3 3 0 0 0-4.2-4.2l-1.8 1.8"/>`),
 };
@@ -546,66 +559,46 @@ const ICONS = {
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
 function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
 
+/* Pre-connected leaderboard sync — baked in so anyone opening this deployed app is
+   already talking to the shared Supabase project, no per-person setup required. Still
+   editable from Settings if the project ever needs to change. */
+const DEFAULT_SUPABASE_URL = 'https://uduzcxpyamhpvtsbbakv.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdXpjeHB5YW1ocHZ0c2JiYWt2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNjU3MTYsImV4cCI6MjEwMjc0MTcxNn0.EUJd4YIz7sPXn3b45kwDgJPm3_4gdj7-p4pTzgqva_Q';
+
 function defaultState(){
   return {
     profile:{ name:'Student', createdAt: todayStr(), avatarDataUrl:'' },
     settings:{ theme:'vintage', workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
-      music:{ enabled:false, volume:0.5, fileName:'' } },
+      music:{ enabled:false, volume:0.5, fileName:'' },
+      leaderboardSync:{ supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY } },
     subjects:[],
     sessions:[], // {id, subjectId, minutes, date, type}
     notes:[], // {id, subjectId, title, body, updatedAt}
     achievementsUnlocked:[],
     pomodoroCount:0,
     sticky:{ targetHours:2, todos:[] }, // {id, text, done}
-    customAchievements:[] // {id, title, desc, metric, target, unlocked, unlockedAt}
+    customAchievements:[], // {id, title, desc, metric, target, unlocked, unlockedAt}
+    leaderboard:{
+      people:[], // legacy local-only rivals from before sync existed — kept for backward compatibility, no longer used for display
+      competitions:[] // legacy local-only challenges — superseded by Supabase-backed challenges
+    }
   };
 }
 let state = load();
-function sanitizeImportedState(parsed){
-  if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid root object');
-  const def = defaultState();
-  const out = mergeState(parsed);
-  const arrayFields = ['subjects','sessions','notes','achievementsUnlocked','customAchievements'];
-  for(const key of arrayFields){
-    if(!Array.isArray(out[key])) throw new Error('Invalid '+key);
-  }
-  if(!out.profile || typeof out.profile !== 'object' || Array.isArray(out.profile)) throw new Error('Invalid profile');
-  if(!out.settings || typeof out.settings !== 'object' || Array.isArray(out.settings)) throw new Error('Invalid settings');
-  if(!out.sticky || typeof out.sticky !== 'object' || Array.isArray(out.sticky)) throw new Error('Invalid sticky data');
-  out.profile.name = typeof out.profile.name === 'string' ? out.profile.name.slice(0,120) : def.profile.name;
-  out.profile.createdAt = typeof out.profile.createdAt === 'string' ? out.profile.createdAt : def.profile.createdAt;
-  out.profile.avatarDataUrl = (typeof out.profile.avatarDataUrl === 'string' && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(out.profile.avatarDataUrl)) ? out.profile.avatarDataUrl : '';
-  out.settings.theme = out.settings.theme === 'cyber' ? 'cyber' : 'vintage';
-  out.settings.workMin = Math.max(1, Math.min(1440, Number(out.settings.workMin)||25));
-  out.settings.breakMin = Math.max(1, Math.min(1440, Number(out.settings.breakMin)||5));
-  out.settings.longBreakMin = Math.max(1, Math.min(1440, Number(out.settings.longBreakMin)||15));
-  out.settings.sessionsBeforeLong = Math.max(1, Math.min(100, Number(out.settings.sessionsBeforeLong)||4));
-  out.settings.music = Object.assign({enabled:false, volume:0.5, fileName:''}, out.settings.music||{});
-  out.settings.music.volume = Math.max(0, Math.min(1, Number(out.settings.music.volume)||0.5));
-  out.sticky.targetHours = Math.max(0, Number(out.sticky.targetHours)||2);
-  if(!Array.isArray(out.sticky.todos)) out.sticky.todos = [];
-  // Only accept sessions with sane primitive values. Ignore malformed records rather than crashing later.
-  out.sessions = out.sessions.filter(x => x && typeof x === 'object' && typeof x.date === 'string' && Number.isFinite(Number(x.minutes)) && Number(x.minutes) >= 0)
-    .map(x => Object.assign({}, x, {minutes:Number(x.minutes)}));
-  out.subjects = out.subjects.filter(x => x && typeof x === 'object' && typeof x.id === 'string' && typeof x.name === 'string')
-    .map(x => Object.assign({}, x, {chapters:Array.isArray(x.chapters)?x.chapters:[]}));
-  out.notes = out.notes.filter(x => x && typeof x === 'object' && typeof x.id === 'string')
-    .map(x => Object.assign({}, x, {attachments:Array.isArray(x.attachments)?x.attachments:[]}));
-  return out;
-}
 function mergeState(parsed){
   const def = defaultState();
-  parsed = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  const merged = Object.assign({}, def, parsed);
-  merged.profile = Object.assign({}, def.profile, parsed.profile||{});
-  merged.settings = Object.assign({}, def.settings, parsed.settings||{});
+  const merged = Object.assign(def, parsed);
+  merged.profile = Object.assign(def.profile, parsed.profile||{});
+  merged.settings = Object.assign(def.settings, parsed.settings||{});
   // Migrate the old boolean dark-mode flag to the new named-theme system
   if(parsed.settings && typeof parsed.settings.darkMode === 'boolean' && !(parsed.settings && parsed.settings.theme)){
     merged.settings.theme = parsed.settings.darkMode ? 'cyber' : 'vintage';
   }
   delete merged.settings.darkMode;
   merged.settings.music = Object.assign({enabled:false, volume:0.5, fileName:''}, (parsed.settings&&parsed.settings.music)||{});
+  merged.settings.leaderboardSync = Object.assign({supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY}, (parsed.settings&&parsed.settings.leaderboardSync)||{});
   merged.sticky = Object.assign({targetHours:2, todos:[]}, parsed.sticky||{});
+  merged.leaderboard = Object.assign({people:[], competitions:[]}, parsed.leaderboard||{});
   return merged;
 }
 function load(){
@@ -620,7 +613,7 @@ function load(){
     }
     if(!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return sanitizeImportedState(parsed);
+    return mergeState(parsed);
   }catch(e){ return defaultState(); }
 }
 function save(){
@@ -721,6 +714,7 @@ function logSession(subjectId, minutes, type){
   if(type==='pomodoro') state.pomodoroCount++;
   save();
   checkAchievements();
+  if(leaderboardSyncReady()) pushMyDailyMinutes();
 }
 function toast(msg){
   const t = document.getElementById('toast');
@@ -739,11 +733,8 @@ function escapeHtml(str){ const d=document.createElement('div'); d.textContent =
 function avatarHtml(sizeClass){
   const initial = escapeHtml((state.profile.name||'S')[0].toUpperCase());
   const cls = sizeClass ? `avatar ${sizeClass}` : 'avatar';
-  const src = state.profile.avatarDataUrl;
-  // Avatar data is validated at load/import time and escaped before being placed in an
-  // HTML attribute. Avoid inline CSS here so arbitrary image data cannot become CSS.
-  if(/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(src)){
-    return `<div class="${cls} avatar-img" style="overflow:hidden;"><img src="${escapeHtml(src)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>`;
+  if(state.profile.avatarDataUrl){
+    return `<div class="${cls} avatar-img" style="background-image:url('${state.profile.avatarDataUrl}')"></div>`;
   }
   return `<div class="${cls}">${initial}</div>`;
 }
@@ -874,13 +865,6 @@ function refreshMusicButton(){
 }
 musicAudio.addEventListener('play', refreshMusicButton);
 musicAudio.addEventListener('pause', refreshMusicButton);
-// Audio File/Blob data is intentionally not stored in localStorage. After a reload the
-// browser no longer has the user's local file, so don't display a stale filename as if it
-// were playable. The user can simply select the file again.
-if(state.settings.music.fileName){
-  state.settings.music.fileName = '';
-  save();
-}
 musicAudio.addEventListener('error', ()=>{
   const codes = {1:'aborted',2:'network error',3:'could not decode this file — try a different format like mp3',4:'format not supported by this browser'};
   const err = musicAudio.error;
@@ -1098,7 +1082,7 @@ function renderDashboard(main){
     </div>
     <div class="rank-banner" id="dashRankBanner" style="cursor:pointer;">
       <span class="nav-icon" style="width:20px;height:20px; color:var(--accent-2);">${ICONS.leaderboard}</span>
-      <span class="rank-num">#${myLeaderboardRank()}</span>
+      <span class="rank-num">${myLeaderboardRank() ? '#'+myLeaderboardRank() : '—'}</span>
       <span class="rank-text">on today's leaderboard <strong>· ${fmtMin(todayMins)}</strong> — tap to see the full board</span>
     </div>
     <div class="grid grid-2">
@@ -1136,6 +1120,7 @@ function renderDashboard(main){
   document.getElementById('dashRankBanner').addEventListener('click', ()=>{ currentPage='leaderboard'; renderNav(); renderMain(); });
   document.getElementById('goPomo').addEventListener('click', ()=>{ currentPage='pomodoro'; renderNav(); renderMain(); });
   document.getElementById('goNote').addEventListener('click', ()=>{ currentPage='notes'; renderNav(); renderMain(); setTimeout(openNoteEditor,0); });
+  if(leaderboardSyncReady()){ pushMyDailyMinutes(); refreshLbCache(); }
 }
 
 /* ============ PAGE CHROME (tab title, favicon badge, background notification) ============ */
@@ -1462,7 +1447,6 @@ function renderPomodoro(main){
   document.getElementById('pomoReset').addEventListener('click', ()=>{
     // Credit whatever was genuinely studied before resetting — don't throw away real
     // progress just because the sprint wasn't finished.
-    if(pomo.running) syncPomoRemaining();
     if(pomo.mode==='work'){
       const studiedMin = (pomoDuration('work') - pomo.remaining) / 60;
       if(studiedMin >= 1){
@@ -1589,7 +1573,6 @@ function renderStopwatch(main){
   document.getElementById('swSubject').addEventListener('change', e=>{ sw.subjectId = e.target.value; saveLiveTimerState(); });
   document.getElementById('swStart').addEventListener('click', toggleSw);
   document.getElementById('swStop').addEventListener('click', ()=>{
-    if(sw.running) sw.elapsed = Math.max(0, Date.now() - sw.startedAt);
     const mins = sw.elapsed/60000;
     if(mins > 0.05) { logSession(sw.subjectId, mins, 'stopwatch'); sfxStopwatchStop(); toast('Session logged: '+fmtMin(mins)); }
     clearInterval(sw.timerId); sw.timerId=null; sw.running=false; sw.elapsed=0;
@@ -1612,9 +1595,6 @@ function toggleSw(){
     playMusicIfEnabled();
     startSwInterval();
   } else {
-    // Capture the exact elapsed time before stopping the interval; the last 500ms tick
-    // may not have fired yet.
-    sw.elapsed = Math.max(0, Date.now() - sw.startedAt);
     sw.running = false; clearInterval(sw.timerId); sw.timerId=null;
     pauseMusic();
   }
@@ -1709,14 +1689,7 @@ function openChapterLinkModal(subId, chId){
   const removeBtn = document.getElementById('removeLinkBtn');
   if(removeBtn) removeBtn.addEventListener('click', ()=>{ ch.link = ''; save(); closeModal(); renderMain(); });
   document.getElementById('saveLinkBtn').addEventListener('click', ()=>{
-    const value = document.getElementById('chLinkInput').value.trim();
-    if(value){
-      try{
-        const url = new URL(value);
-        if(url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Unsupported protocol');
-      }catch(e){ toast('Please enter a valid HTTP or HTTPS URL.'); return; }
-    }
-    ch.link = value;
+    ch.link = document.getElementById('chLinkInput').value.trim();
     save(); closeModal(); renderMain();
   });
 }
@@ -2210,50 +2183,287 @@ function renderAnalytics(main){
     <div class="legend">${data.map(d=>`<div class="legend-item"><span class="swatch" style="background:${d.color}"></span>${escapeHtml(d.name)}<span class="pct">${Math.round(d.mins/total*100)}%</span></div>`).join('')}</div>
   </div>`;
 }
-
-/* ============ LEADERBOARD (UI only — real sync comes in a later chat) ============ */
-/* "Everyone else" is placeholder preview data for now, clearly labeled as such in the UI,
-   so the ranked-list design can be built and tested before any backend exists. Your own
-   row is always real — computed live from your actual study time, same as the dashboard. */
-const DEMO_LEADERBOARD_PEERS = [
-  { name:'Alex', minutes:245 },
-  { name:'Priya', minutes:198 },
-  { name:'Sam', minutes:150 },
-  { name:'Jordan', minutes:92 },
-];
-const DEMO_AVATAR_COLORS = ['#4C8F7E','#B4893A','#7B92D9','#C4735C','#9A87C4'];
-function demoAvatarHtml(peer, sizeClass){
-  const cls = sizeClass ? `avatar ${sizeClass}` : 'avatar';
-  const color = DEMO_AVATAR_COLORS[peer.name.charCodeAt(0) % DEMO_AVATAR_COLORS.length];
-  return `<div class="${cls}" style="background:${color};">${escapeHtml(peer.name[0].toUpperCase())}</div>`;
+/* ============ LEADERBOARD & CHALLENGES (Supabase-backed) ============ */
+/* Everyone who opens this deployed app shares the same Supabase project, so the roster
+   and challenges are real and automatic — no manual entry. Only your name, photo, and
+   today's total minutes are ever sent; nothing about your notes, subjects, or sessions
+   leaves the device. A small in-memory cache lets the dashboard show a rank instantly
+   without every render needing to await a network call — it's refreshed in the
+   background and the page re-renders itself once fresh data lands. */
+let sbClient = null;
+function normalizeSupabaseUrl(url){
+  return (url||'').trim().replace(/\/rest\/v1\/?$/i,'').replace(/\/+$/,'');
 }
-function getLeaderboardRows(){
-  const me = { name: state.profile.name || 'You', minutes: Math.round(liveTodayMinutes()), isMe:true };
-  const rows = DEMO_LEADERBOARD_PEERS.map(p=>({...p, isMe:false})).concat([me]);
-  rows.sort((a,b)=> b.minutes - a.minutes);
-  return rows;
+function getSbClient(){
+  const cfg = state.settings.leaderboardSync;
+  const url = normalizeSupabaseUrl(cfg.supabaseUrl);
+  if(!url || !cfg.supabaseKey || typeof supabase === 'undefined') return null;
+  if(!sbClient || sbClient.__url!==url || sbClient.__key!==cfg.supabaseKey){
+    try{ sbClient = supabase.createClient(url, cfg.supabaseKey); sbClient.__url=url; sbClient.__key=cfg.supabaseKey; }
+    catch(e){ sbClient = null; }
+  }
+  return sbClient;
+}
+function leaderboardSyncReady(){
+  const cfg = state.settings.leaderboardSync;
+  return !!(normalizeSupabaseUrl(cfg.supabaseUrl) && cfg.supabaseKey && state.profile.name && getSbClient());
+}
+let lbCache = { rows:[], challenges:[], loaded:false, error:null };
+
+async function pushMyPlayerRow(){
+  if(!leaderboardSyncReady()) return;
+  const client = getSbClient();
+  try{
+    await client.from('players').upsert({
+      name: state.profile.name, avatar_data_url: state.profile.avatarDataUrl || null, updated_at: new Date().toISOString()
+    }, { onConflict:'name' });
+  }catch(e){ /* silent — don't interrupt studying over a sync hiccup */ }
+}
+async function pushMyDailyMinutes(){
+  if(!leaderboardSyncReady()) return;
+  const client = getSbClient();
+  try{
+    await client.from('daily_minutes').upsert({
+      player_name: state.profile.name, study_date: todayStr(), minutes: Math.round(liveTodayMinutes()), updated_at: new Date().toISOString()
+    }, { onConflict:'player_name,study_date' });
+  }catch(e){}
+}
+async function fetchRosterRows(){
+  const client = getSbClient();
+  if(!client) return { rows:null, error:'Leaderboard isn\'t connected.' };
+  try{
+    const today = todayStr();
+    const [playersRes, minutesRes] = await Promise.all([
+      client.from('players').select('name,avatar_data_url'),
+      client.from('daily_minutes').select('player_name,minutes').eq('study_date', today)
+    ]);
+    if(playersRes.error) return { rows:null, error:playersRes.error.message };
+    if(minutesRes.error) return { rows:null, error:minutesRes.error.message };
+    const minutesByName = {};
+    minutesRes.data.forEach(r=> minutesByName[r.player_name] = r.minutes);
+    const rows = playersRes.data.map(p=>({
+      name:p.name, avatarDataUrl:p.avatar_data_url, minutes: Math.round(minutesByName[p.name]||0),
+      isMe: p.name === state.profile.name
+    }));
+    rows.sort((a,b)=> b.minutes - a.minutes);
+    return { rows, error:null };
+  }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
+}
+async function fetchMyChallenges(){
+  const client = getSbClient();
+  if(!client) return { rows:null, error:'not configured' };
+  try{
+    const { data, error } = await client.from('challenges').select('*').contains('participant_names', [state.profile.name]).order('created_at', { ascending:false });
+    if(error) return { rows:null, error:error.message };
+    return { rows: data||[], error:null };
+  }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
+}
+async function refreshLbCache(){
+  const { rows, error } = await fetchRosterRows();
+  if(rows) lbCache.rows = rows; else lbCache.error = error;
+  const { rows: chs } = await fetchMyChallenges();
+  if(chs) lbCache.challenges = chs;
+  lbCache.loaded = true;
+  updateDashRankBanner();
+  updateLeaderboardDom();
+}
+function updateLeaderboardDom(){
+  // Patches the already-rendered skeleton in place — deliberately does NOT call
+  // renderMain(), since this runs on a poll timer and a render→refresh→render loop
+  // would never stop.
+  const listEl = document.getElementById('lbList');
+  if(listEl){
+    listEl.innerHTML = lbCache.loaded
+      ? (lbCache.rows.length ? lbCache.rows.map(leaderboardRowHtml).join('') : '<p class="sticky-empty">No one\'s studied yet today.</p>')
+      : '<p class="sticky-empty" style="opacity:.7;">Loading…</p>';
+  }
+  const compListEl = document.getElementById('compList');
+  if(compListEl){
+    const active = lbCache.challenges.filter(c=>!c.finished);
+    const finished = lbCache.challenges.filter(c=>c.finished);
+    compListEl.innerHTML = (active.length ? active.map(competitionCardHtml).join('') : `<div class="card empty"><h3>No active challenges</h3><p>Pick a rival and race them for a few days.</p></div>`)
+      + (finished.length ? `<details style="margin-top:4px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--text-muted); font-weight:600;">Past Challenges (${finished.length})</summary><div style="display:flex; flex-direction:column; gap:14px; margin-top:12px;">${finished.map(competitionCardHtml).join('')}</div></details>` : '');
+    compListEl.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleCompetitionToday(b.dataset.settleComp)));
+  }
+  const statusEl = document.getElementById('lbStatus');
+  if(statusEl) statusEl.textContent = lbCache.error ? ('Couldn\'t refresh — ' + lbCache.error) : ('Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
 }
 function myLeaderboardRank(){
-  const rows = getLeaderboardRows();
-  return rows.findIndex(r=>r.isMe) + 1;
+  if(!lbCache.loaded || !lbCache.rows.length) return null;
+  const i = lbCache.rows.findIndex(r=>r.isMe);
+  return i===-1 ? null : i+1;
+}
+function updateDashRankBanner(){
+  const el = document.getElementById('dashRankBanner');
+  if(!el) return;
+  const rank = myLeaderboardRank();
+  const rankEl = el.querySelector('.rank-num');
+  if(rankEl) rankEl.textContent = rank ? `#${rank}` : '—';
+}
+function personAvatarByName(name, avatarDataUrl, sizeClass){
+  const cls = sizeClass ? `avatar ${sizeClass}` : 'avatar';
+  if(avatarDataUrl) return `<div class="${cls} avatar-img" style="background-image:url('${avatarDataUrl}')"></div>`;
+  const colors = ['#4C8F7E','#B4893A','#7B92D9','#C4735C','#9A87C4','#5FA38F','#C99048'];
+  const color = colors[(name||'?').charCodeAt(0) % colors.length];
+  return `<div class="${cls}" style="background:${color};">${escapeHtml((name||'?')[0].toUpperCase())}</div>`;
 }
 function leaderboardRowHtml(r, i){
   const medals = ['🥇','🥈','🥉'];
-  const avatar = r.isMe ? avatarHtml('avatar-sm') : demoAvatarHtml(r,'avatar-sm');
   return `<div class="lb-row ${r.isMe?'lb-me':''}">
     <span class="lb-rank">${medals[i] || (i+1)}</span>
-    ${avatar}
+    ${personAvatarByName(r.name, r.avatarDataUrl, 'avatar-sm')}
     <span class="lb-name">${escapeHtml(r.name)}${r.isMe?' <span class="lb-you">(you)</span>':''}</span>
     <span class="lb-mins mono">${fmtMin(r.minutes)}</span>
   </div>`;
 }
-function renderLeaderboard(main){
-  const rows = getLeaderboardRows();
-  main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Today's study time, ranked. Highest wins the day.</p></div></div>
-  <div class="card" style="max-width:480px;">
-    <p style="font-size:11px; color:var(--text-muted); background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:9px 11px; margin-bottom:14px;">This is a preview with placeholder names — connecting it to a shared backend (so real friends show up here) is coming in a later update.</p>
-    <div id="lbList">${rows.map((r,i)=>leaderboardRowHtml(r,i)).join('')}</div>
+
+/* ---- Challenges: pick rivals from the real roster, race for N days, +5/-5 per day
+   using real historical daily_minutes so scoring is always accurate, not approximated. ---- */
+function compTitle(comp){
+  if(comp.name) return comp.name;
+  return 'You vs ' + comp.participant_names.filter(n=>n!==state.profile.name).join(' & ');
+}
+function openNewCompetitionModal(){
+  const others = lbCache.rows.filter(r=>!r.isMe);
+  if(others.length===0){
+    toast('No one else has joined the leaderboard yet — share the app with a friend first.');
+    return;
+  }
+  openModal(`
+    <button class="close-x" id="closeM">×</button>
+    <h3>New Challenge</h3>
+    <div class="field"><label>Challenge Name (optional)</label><input type="text" id="compName" placeholder="e.g. Finals Week Sprint"></div>
+    <div class="field"><label>Choose Rivals</label>
+      <div id="compParticipants" style="display:flex; flex-direction:column; gap:8px; max-height:180px; overflow-y:auto;">
+        ${others.map(p=>`<label class="row" style="gap:9px; padding:6px 0; cursor:pointer;">
+          <input type="checkbox" class="comp-participant-cb" value="${escapeHtml(p.name)}">
+          ${personAvatarByName(p.name, p.avatarDataUrl, 'avatar-xs')}
+          <span style="font-size:14px;">${escapeHtml(p.name)}</span>
+        </label>`).join('')}
+      </div>
+    </div>
+    <div class="field"><label>Duration (days)</label><input type="number" id="compDays" min="1" max="60" value="7"></div>
+    <div class="modal-actions">
+      <button class="btn" id="cancelM">Cancel</button>
+      <button class="btn btn-primary" id="startCompBtn">Start Challenge</button>
+    </div>
+  `);
+  document.getElementById('closeM').addEventListener('click', closeModal);
+  document.getElementById('cancelM').addEventListener('click', closeModal);
+  document.getElementById('startCompBtn').addEventListener('click', async ()=>{
+    const checked = Array.from(document.querySelectorAll('.comp-participant-cb:checked')).map(cb=>cb.value);
+    if(checked.length===0){ toast('Pick at least one rival'); return; }
+    const days = Math.max(1, parseInt(document.getElementById('compDays').value)||7);
+    const name = document.getElementById('compName').value.trim();
+    const participantNames = [state.profile.name, ...checked];
+    const points = {}; participantNames.forEach(n=> points[n]=0);
+    const client = getSbClient();
+    const btn = document.getElementById('startCompBtn');
+    btn.textContent = 'Starting…'; btn.disabled = true;
+    try{
+      const { error } = await client.from('challenges').insert({
+        name: name||null, participant_names: participantNames, days,
+        start_date: todayStr(), points, log:[], finished:false
+      });
+      if(error){ toast('Could not start challenge — ' + error.message); btn.textContent='Start Challenge'; btn.disabled=false; return; }
+      closeModal(); toast('Challenge started — good luck!');
+      await refreshLbCache(); renderMain();
+    }catch(e){ toast('Could not start challenge — ' + (e.message||'network error')); btn.textContent='Start Challenge'; btn.disabled=false; }
+  });
+}
+async function settleCompetitionToday(compId){
+  const comp = lbCache.challenges.find(c=>c.id===compId);
+  if(!comp || comp.finished) return;
+  const today = todayStr();
+  if(comp.last_settled_date === today){ toast('Already settled for today'); return; }
+  const client = getSbClient();
+  try{
+    const { data: minsData, error: minsErr } = await client.from('daily_minutes').select('player_name,minutes').eq('study_date', today).in('player_name', comp.participant_names);
+    if(minsErr){ toast('Could not settle — ' + minsErr.message); return; }
+    const minutesByName = {}; comp.participant_names.forEach(n=> minutesByName[n]=0);
+    minsData.forEach(r=> minutesByName[r.player_name]=Math.round(r.minutes));
+    const top = Math.max(...comp.participant_names.map(n=>minutesByName[n]));
+    const winners = comp.participant_names.filter(n=>minutesByName[n]===top);
+    const isTie = winners.length>1;
+    const points = Object.assign({}, comp.points);
+    if(!isTie) comp.participant_names.forEach(n=>{ points[n] = (points[n]||0) + (n===winners[0] ? 5 : -5); });
+    const log = (comp.log||[]).concat([{ date:today, standings: comp.participant_names.map(n=>({name:n, minutes:minutesByName[n]})), winner: isTie?null:winners[0] }]);
+    const dayIndex = (comp.day_index||0) + 1;
+    const finished = dayIndex >= comp.days;
+    const { error } = await client.from('challenges').update({ points, log, last_settled_date:today, day_index:dayIndex, finished }).eq('id', comp.id);
+    if(error){ toast('Could not settle — ' + error.message); return; }
+    toast(isTie ? "Today was a tie — no points awarded" : `${winners[0]} won today (+5)`);
+    await refreshLbCache(); renderMain();
+  }catch(e){ toast('Could not settle — ' + (e.message||'network error')); }
+}
+function competitionCardHtml(comp){
+  const standings = comp.participant_names.map(n=>({ name:n, points: (comp.points&&comp.points[n])||0 })).sort((a,b)=> b.points-a.points);
+  const settledToday = comp.last_settled_date === todayStr();
+  const overallWinner = comp.finished ? standings[0] : null;
+  const avatarFor = (name)=>{ const row = lbCache.rows.find(r=>r.name===name); return personAvatarByName(name, row?row.avatarDataUrl:null, 'avatar-xs'); };
+  return `<div class="card comp-card">
+    <div class="row" style="justify-content:space-between; margin-bottom:4px;">
+      <h3 style="font-size:15px;">${escapeHtml(compTitle(comp))}</h3>
+      <span class="badge">${comp.finished? 'Finished' : `Day ${Math.min(comp.day_index+1,comp.days)} / ${comp.days}`}</span>
+    </div>
+    <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">+5 for the day's top studier, −5 for the rest.</p>
+    <div class="comp-standings">
+      ${standings.map(s=>`<div class="comp-row ${s.name===state.profile.name?'lb-me':''}">
+        ${avatarFor(s.name)}
+        <span class="comp-name">${escapeHtml(s.name)}${s.name===state.profile.name?' <span class="lb-you">(you)</span>':''}</span>
+        <span class="comp-points ${s.points>=0?'pos':'neg'}">${s.points>=0?'+':''}${s.points}</span>
+      </div>`).join('')}
+    </div>
+    ${comp.finished
+      ? `<p class="comp-winner-note">🏆 ${escapeHtml(overallWinner.name)} wins the challenge!</p>`
+      : settledToday
+        ? `<p class="comp-settled-note">✓ Today's result is in — check back tomorrow.</p>`
+        : `<button class="btn btn-sm btn-primary" data-settle-comp="${comp.id}">Log Today's Result</button>`
+    }
   </div>`;
+}
+let lbPollId = null;
+function stopLbPoll(){ if(lbPollId){ clearInterval(lbPollId); lbPollId=null; } }
+function startLbPoll(){
+  stopLbPoll();
+  lbPollId = setInterval(()=>{ if(currentPage==='leaderboard') refreshLbCache(); else stopLbPoll(); }, 20000);
+}
+function renderLeaderboard(main){
+  if(!leaderboardSyncReady()){
+    main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Compete on daily study hours with friends.</p></div></div>
+    <div class="card" style="max-width:480px;">
+      <h3 style="font-size:16px; margin-bottom:10px;">Not connected</h3>
+      <p style="font-size:13px; color:var(--text-muted);">The leaderboard needs a Project URL and anon key set in Settings to work. Check the Leaderboard Sync section there.</p>
+    </div>`;
+    return;
+  }
+  main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Today's study time, ranked. Highest wins the day.</p></div></div>
+  <div class="grid grid-2">
+    <div class="card" style="align-self:start;">
+      <h3 style="font-size:16px; margin-bottom:12px;">Today's Ranking</h3>
+      <div id="lbList">${lbCache.loaded ? (lbCache.rows.length ? lbCache.rows.map(leaderboardRowHtml).join('') : '<p class="sticky-empty">No one\'s studied yet today.</p>') : '<p class="sticky-empty" style="opacity:.7;">Loading…</p>'}</div>
+      <p style="font-size:11px; color:var(--text-muted); margin-top:12px;" id="lbStatus"></p>
+    </div>
+    <div>
+      <div class="row" style="justify-content:space-between; margin-bottom:12px;">
+        <h3 style="font-size:16px; display:flex; align-items:center; gap:8px;"><span class="nav-icon" style="width:17px;height:17px;">${ICONS.swords}</span>Challenges</h3>
+        <button class="btn btn-sm btn-primary" id="newCompBtn">+ New Challenge</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:14px;" id="compList">
+        ${(()=>{
+          const active = lbCache.challenges.filter(c=>!c.finished);
+          const finished = lbCache.challenges.filter(c=>c.finished);
+          return (active.length ? active.map(competitionCardHtml).join('') : `<div class="card empty"><h3>No active challenges</h3><p>Pick a rival and race them for a few days.</p></div>`)
+            + (finished.length ? `<details style="margin-top:4px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--text-muted); font-weight:600;">Past Challenges (${finished.length})</summary><div style="display:flex; flex-direction:column; gap:14px; margin-top:12px;">${finished.map(competitionCardHtml).join('')}</div></details>` : '');
+        })()}
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('newCompBtn').addEventListener('click', openNewCompetitionModal);
+  document.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleCompetitionToday(b.dataset.settleComp)));
+  pushMyPlayerRow(); pushMyDailyMinutes();
+  refreshLbCache();
+  startLbPoll();
 }
 
 /* ============ ACHIEVEMENTS ============ */
@@ -2265,7 +2475,7 @@ const ACHIEVEMENTS = [
   {id:'three_streak', title:'Building Momentum', desc:'Reach a 3-day streak', check: s=> currentStreak()>=3},
   {id:'week_streak', title:'Week Warrior', desc:'Reach a 7-day streak', check: s=> currentStreak()>=7},
   {id:'first_subject', title:'Getting Organized', desc:'Add your first subject', check: s=> s.subjects.length>=1},
-  {id:'first_note', title:'Note Taker', desc:'Write your first note', check: s=> s.notes.length>=1},
+  {id:'first_note', title:'Note Taker', desc:'Write your first note', check: s=> s.notes.length>=5 || s.notes.length>=1},
   {id:'chapter_complete', title:'Chapter Closed', desc:'Finish every chapter in a subject', check: s=> s.subjects.some(sub=> sub.chapters.length>0 && sub.chapters.every(c=>c.done))},
   {id:'five_subjects', title:'Renaissance Scholar', desc:'Track 5 different subjects', check: s=> s.subjects.length>=5},
 ];
@@ -2496,8 +2706,16 @@ function renderSettings(main){
       <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">Background music you load on the Pomodoro or Stopwatch pages is separate and unaffected by this toggle.</p>
     </div>
     <div class="card">
+      <h3 style="font-size:15px; margin-bottom:14px;">Leaderboard Sync</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;" id="lbSyncStatus">${leaderboardSyncReady() ? '🟢 Connected — your name, photo, and today\'s minutes sync automatically.' : '🔴 Not connected.'}</p>
+      <div class="field"><label>Project URL</label><input type="text" id="lbSyncUrl" value="${escapeHtml(state.settings.leaderboardSync.supabaseUrl)}" placeholder="https://xxxxx.supabase.co"></div>
+      <div class="field"><label>Anon Public API Key</label><input type="text" id="lbSyncKey" value="${escapeHtml(state.settings.leaderboardSync.supabaseKey)}" placeholder="eyJhbGciOi..."></div>
+      <button class="btn btn-primary" id="lbSyncSave">Save Connection</button>
+      <p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Only your display name, profile photo, and today's total minutes are ever sent — nothing about your notes, subjects, or session history leaves this device.</p>
+    </div>
+    <div class="card">
       <h3 style="font-size:15px; margin-bottom:14px;">Your Data</h3>
-      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Everything is stored only in this browser — nothing leaves your device.</p>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Everything you track — sessions, notes, subjects — is stored only in this browser. The one exception is the Leaderboard above, if connected.</p>
       <div class="row" style="margin-bottom:10px;">
         <button class="btn" id="exportBtn">Export Data (.json)</button>
         <button class="btn" id="importBtn">Import Data</button>
@@ -2506,6 +2724,20 @@ function renderSettings(main){
       <button class="btn btn-danger" id="resetBtn">Reset All Data</button>
     </div>
   </div>`;
+  document.getElementById('lbSyncSave').addEventListener('click', async ()=>{
+    const url = document.getElementById('lbSyncUrl').value.trim();
+    const key = document.getElementById('lbSyncKey').value.trim();
+    state.settings.leaderboardSync = { supabaseUrl:url, supabaseKey:key };
+    sbClient = null;
+    const statusEl = document.getElementById('lbSyncStatus');
+    statusEl.textContent = 'Checking…';
+    const { error } = await fetchRosterRows();
+    if(error){ statusEl.textContent = '🔴 Could not connect — ' + error; return; }
+    save();
+    statusEl.textContent = '🟢 Connected — your name, photo, and today\'s minutes sync automatically.';
+    toast('Leaderboard connected');
+    pushMyPlayerRow(); pushMyDailyMinutes();
+  });
   document.getElementById('darkSwitch').addEventListener('change', e=>{ setTheme(e.target.checked ? 'cyber' : 'vintage'); });
   document.getElementById('notifSwitch').addEventListener('change', async e=>{
     if(e.target.checked){
@@ -2572,12 +2804,8 @@ function importData(e){
   reader.onload = ()=>{
     try{
       const parsed = JSON.parse(reader.result);
-      const imported = sanitizeImportedState(parsed);
-      // Only replace live state after the entire import has passed validation.
-      const previousState = state;
-      state = imported;
-      if(!save()){ state = previousState; throw new Error('Could not save imported data'); }
-      applyTheme(); renderNav(); renderMain();
+      state = mergeState(parsed);
+      save(); applyTheme(); renderNav(); renderMain();
       toast('Data imported');
     }catch(err){ toast('Invalid file'); }
   };
