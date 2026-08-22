@@ -136,7 +136,22 @@ nav{ display:flex; flex-direction:column; gap:2px; flex:1; }
 .beta-banner a{ font-weight:600; }
 .beta-banner button{ margin-left:auto; background:none; border:none; color:var(--text-muted); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; flex-shrink:0; }
 .beta-banner button:hover{ color:var(--text); }
-.dash-profile-btn{ background:none; border:none; padding:0; cursor:pointer; border-radius:50%; align-self:center; transition:transform .15s ease; flex-shrink:0; }
+.dash-profile-btn{ display:flex; align-items:center; gap:9px; background:none; border:none; padding:4px 6px 4px 4px; cursor:pointer; border-radius:24px; align-self:center; transition:background .15s ease; flex-shrink:0; }
+.dash-profile-btn:hover{ background:var(--surface-2); }
+.dash-profile-name{ font-size:13.5px; font-weight:600; color:var(--text); }
+.dash-header-actions{ display:flex; align-items:center; gap:10px; }
+.notif-bell-btn{ position:relative; background:none; border:1px solid var(--card-border); border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); cursor:pointer; transition:all .15s ease; flex-shrink:0; }
+.notif-bell-btn:hover{ color:var(--text); border-color:var(--accent-soft); }
+.notif-bell-btn .nav-icon{ width:18px; height:18px; }
+.notif-bell-badge{ position:absolute; top:-4px; right:-4px; min-width:17px; height:17px; padding:0 3px; border-radius:9px; background:var(--danger); color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.notif-row{ display:flex; gap:12px; padding:12px 6px; border-bottom:1px solid var(--border); }
+.notif-row:last-child{ border-bottom:none; }
+.notif-row.unread{ background:var(--accent-soft); border-radius:8px; }
+.notif-icon{ font-size:18px; flex-shrink:0; width:26px; text-align:center; }
+.notif-text{ flex:1; min-width:0; }
+.notif-title{ font-size:13.5px; font-weight:700; margin-bottom:2px; }
+.notif-body{ font-size:12.5px; color:var(--text-muted); margin-bottom:4px; }
+.notif-time{ font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
 .dash-profile-btn:hover{ transform:scale(1.06); }
 .page-header::before{
   content:""; position:absolute; top:-16px; left:12px; width:48px; height:18px;
@@ -536,13 +551,23 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
     <span>Menu</span>
   </button>
   <span class="mobile-topbar-title"><svg class="brand-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/></svg>Studium</span>
+  <button class="bell-btn" id="topbarBellBtn" title="Notifications" style="margin-left:auto;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10.5a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14.5 6 10.5Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>
+    <span class="bell-badge" id="topbarBellBadge" style="display:none;"></span>
+  </button>
 </div>
 <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="mark"><svg class="brand-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/></svg>Studium</div>
+      <div class="brand-row">
+        <div class="mark"><svg class="brand-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.3c-2.2-1.6-5.3-2.1-8.3-1.1v11.4c3-1 6.1-.5 8.3 1.1c2.2-1.6 5.3-2.1 8.3-1.1V5.2c-3-1-6.1-.5-8.3 1.1Z"/><path d="M12 6.3v11.4"/></svg>Studium</div>
+        <button class="bell-btn" id="sidebarBellBtn" title="Notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10.5a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14.5 6 10.5Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>
+          <span class="bell-badge" id="sidebarBellBadge" style="display:none;"></span>
+        </button>
+      </div>
       <div class="sub">Study Tracker</div>
     </div>
     <nav id="nav"></nav>
@@ -613,6 +638,7 @@ const ICONS = {
   chevron: ISVG(`<path d="M6 9l6 6 6-6"/>`),
   link: ISVG(`<path d="M9.5 14.5l5-5"/><path d="M8 12.3 6.2 14.1a3 3 0 0 0 4.2 4.2l1.8-1.8"/><path d="M16 11.7l1.8-1.8a3 3 0 0 0-4.2-4.2l-1.8 1.8"/>`),
   grip: ISVG(`<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>`),
+  bell: ISVG(`<path d="M6 10.5a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14.5 6 10.5Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/>`),
   bell: ISVG(`<path d="M6 10.5a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5Z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/>`),
 };
 
@@ -632,7 +658,7 @@ function defaultState(){
     settings:{ theme:'vintage', workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
       music:{ enabled:false, volume:0.5, fileName:'' },
       leaderboardSync:{ supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY },
-      stickyPos:null, lastSeenAnnouncementId:null },
+      stickyPos:null, lastSeenAnnouncementId:null, lastAnnouncedTopper:null },
     subjects:[],
     sessions:[], // {id, subjectId, minutes, date, type}
     notes:[], // {id, subjectId, title, body, updatedAt}
@@ -641,6 +667,7 @@ function defaultState(){
     lastSeenNotifAt:null,
     sticky:{ targetHours:2, todos:[] }, // {id, text, done}
     customAchievements:[], // {id, title, desc, metric, target, unlocked, unlockedAt}
+    notifications:[], // {id, type, title, body, createdAt, read}
     leaderboard:{
       people:[], // legacy local-only rivals from before sync existed — kept for backward compatibility, no longer used for display
       competitions:[] // legacy local-only challenges — superseded by Supabase-backed challenges
@@ -1308,7 +1335,16 @@ function renderDashboard(main){
   main.innerHTML = `
     <div class="page-header">
       <div><h1>Welcome back, ${escapeHtml(state.profile.name)}</h1><p>Here's where things stand today.</p></div>
-      <button id="dashProfileBtn" class="dash-profile-btn" title="Go to Profile">${avatarHtml('avatar-sm')}</button>
+      <div class="dash-header-actions">
+        <button id="notifBellBtn" class="notif-bell-btn" title="Notifications">
+          <span class="nav-icon">${ICONS.bell}</span>
+          <span id="notifBellBadge" class="notif-bell-badge" style="display:${unreadNotifCount()>0?'flex':'none'};">${unreadNotifCount()>9?'9+':unreadNotifCount()}</span>
+        </button>
+        <button id="dashProfileBtn" class="dash-profile-btn" title="Go to Profile">
+          ${avatarHtml('avatar-sm')}
+          <span class="dash-profile-name">${escapeHtml(state.profile.name)}</span>
+        </button>
+      </div>
     </div>
     ${showBetaBanner ? `<div class="beta-banner" id="betaBanner">
       <span class="nav-icon" style="width:16px;height:16px;">${ICONS.pin}</span>
@@ -1360,6 +1396,7 @@ function renderDashboard(main){
   document.getElementById('dashHeatmap').appendChild(buildHeatmapGrid(35));
   document.getElementById('dashRankBanner').addEventListener('click', ()=>{ currentPage='leaderboard'; renderNav(); renderMain(); });
   document.getElementById('dashProfileBtn').addEventListener('click', ()=>{ currentPage='profile'; renderNav(); renderMain(); });
+  document.getElementById('notifBellBtn').addEventListener('click', openNotifPanel);
   const betaBanner = document.getElementById('betaBanner');
   if(betaBanner){
     document.getElementById('betaBannerClose').addEventListener('click', ()=>{ showBetaBanner = false; betaBanner.remove(); });
@@ -2488,6 +2525,7 @@ async function checkForNewAnnouncement(){
   if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
     try{ new Notification('Studium update', { body: row.message, tag:'studium-announcement' }); }catch(e){}
   }
+  pushNotification('announcement', 'Studium update', row.message);
 }
 async function postAnnouncement(message){
   const client = getSbClient();
@@ -2555,6 +2593,7 @@ async function refreshLbCache(){
   lbCache.loaded = true;
   updateDashRankBanner();
   updateLeaderboardDom();
+  checkDailyTopper();
 }
 function updateLeaderboardDom(){
   // Patches the already-rendered skeleton in place — deliberately does NOT call
@@ -2681,7 +2720,9 @@ async function settleCompetitionToday(compId){
     const finished = dayIndex >= comp.days;
     const { error } = await client.from('challenges').update({ points, log, last_settled_date:today, day_index:dayIndex, finished }).eq('id', comp.id);
     if(error){ toast('Could not settle — ' + error.message); return; }
-    toast(isTie ? "Today was a tie — no points awarded" : `${winners[0]} won today (+5)`);
+    const resultMsg = isTie ? "Today was a tie — no points awarded" : `${winners[0]} won today (+5)`;
+    toast(resultMsg);
+    pushNotification('challenge', compTitle(comp), resultMsg + (finished ? ' — challenge finished!' : ''));
     await refreshLbCache(); renderMain();
   }catch(e){ toast('Could not settle — ' + (e.message||'network error')); }
 }
@@ -2782,12 +2823,92 @@ function formatMetric(metric, value){
   const v = metric==='totalHours' ? (Math.round(value*10)/10) : Math.round(value);
   return `${v} ${GOAL_METRICS[metric] ? GOAL_METRICS[metric].unit : ''}`;
 }
+/* ============ NOTIFICATION CENTER ============ */
+/* A persistent, reviewable history — toasts are still shown for immediate feedback, but
+   they vanish in a couple seconds. This is the "come back and actually see what
+   happened" version, surfaced through the bell icon next to your profile photo. */
+const NOTIF_ICONS = {
+  achievement: '🏆', pomodoro: '🍅', task: '✓', challenge: '🎮', topper: '👑', announcement: '📣'
+};
+function pushNotification(type, title, body){
+  state.notifications = state.notifications || [];
+  state.notifications.unshift({ id:uid(), type, title, body, createdAt:new Date().toISOString(), read:false });
+  if(state.notifications.length > 50) state.notifications.length = 50;
+  save();
+  updateNotifBell();
+}
+function unreadNotifCount(){ return (state.notifications||[]).filter(n=>!n.read).length; }
+function updateNotifBell(){
+  const badge = document.getElementById('notifBellBadge');
+  if(!badge) return;
+  const count = unreadNotifCount();
+  badge.style.display = count>0 ? 'flex' : 'none';
+  badge.textContent = count>9 ? '9+' : String(count);
+}
+function relativeTime(iso){
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs/60000);
+  if(mins < 1) return 'Just now';
+  if(mins < 60) return mins+'m ago';
+  const hrs = Math.round(mins/60);
+  if(hrs < 24) return hrs+'h ago';
+  const days = Math.round(hrs/24);
+  if(days < 7) return days+'d ago';
+  return new Date(iso).toLocaleDateString();
+}
+function openNotifPanel(){
+  renderNotifPanel();
+  (state.notifications||[]).forEach(n=> n.read = true);
+  save();
+  updateNotifBell();
+}
+function renderNotifPanel(){
+  const list = state.notifications || [];
+  openModal(`
+    <button class="close-x" id="closeM">×</button>
+    <div class="row" style="justify-content:space-between; margin-bottom:14px;">
+      <h3>Notifications</h3>
+      ${list.length ? '<button class="btn btn-sm" id="notifClearBtn">Clear All</button>' : ''}
+    </div>
+    <div id="notifList" style="max-height:56vh; overflow-y:auto;">
+      ${list.length ? list.map(n=>`<div class="notif-row ${n.read?'':'unread'}">
+        <span class="notif-icon">${NOTIF_ICONS[n.type]||'🔔'}</span>
+        <div class="notif-text">
+          <div class="notif-title">${escapeHtml(n.title)}</div>
+          <div class="notif-body">${escapeHtml(n.body)}</div>
+          <div class="notif-time">${relativeTime(n.createdAt)}</div>
+        </div>
+      </div>`).join('') : `<div class="empty"><h3>Nothing yet</h3><p>Achievements, finished sprints, challenge results, and updates will show up here.</p></div>`}
+    </div>
+  `, {large:true});
+  document.getElementById('closeM').addEventListener('click', closeModal);
+  const clearBtn = document.getElementById('notifClearBtn');
+  if(clearBtn) clearBtn.addEventListener('click', ()=>{
+    confirmAction('Clear all notifications? This can\'t be undone.', ()=>{
+      state.notifications = []; save(); updateNotifBell(); closeModal();
+    });
+  });
+}
+/* Spot-checks the current #1 on today's leaderboard and notifies once when it's someone
+   new — not on every poll tick, only when the actual leader changes for the day. */
+function checkDailyTopper(){
+  if(!lbCache.loaded || lbCache.rows.length < 2) return;
+  const top = lbCache.rows[0];
+  if(top.minutes <= 0) return;
+  const key = todayStr() + ':' + top.name;
+  if(state.settings.lastAnnouncedTopper === key) return;
+  state.settings.lastAnnouncedTopper = key;
+  save();
+  const isMe = top.isMe;
+  pushNotification('topper', isMe ? "You're leading today! 👑" : `${top.name} is leading today`, `${top.name} — ${fmtMin(top.minutes)} logged so far.`);
+}
 function celebrateGoal(title){
   sfxAchievement();
   if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
     try{ new Notification('Achievement unlocked', {body:title}); }catch(e){}
   }
   toast('Achievement unlocked: '+title);
+  pushNotification('achievement', 'Achievement unlocked', title);
 }
 function notifyTaskDone(name){
   sfxStopwatchStop();
@@ -2795,6 +2916,7 @@ function notifyTaskDone(name){
     try{ new Notification('Task complete', {body:name}); }catch(e){}
   }
   toast('✓ Done: ' + name);
+  pushNotification('task', 'Task complete', name);
 }
 function checkAchievements(){
   let changed = false;
@@ -3140,6 +3262,7 @@ function notifyUser(title, body){
     try{ new Notification(title, {body}); }catch(e){}
   }
   toast(title+' — '+body);
+  pushNotification('pomodoro', title, body);
 }
 function exportData(){
   const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
