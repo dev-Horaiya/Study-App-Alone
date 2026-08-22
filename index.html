@@ -613,6 +613,7 @@ const ICONS = {
   chevron: ISVG(`<path d="M6 9l6 6 6-6"/>`),
   link: ISVG(`<path d="M9.5 14.5l5-5"/><path d="M8 12.3 6.2 14.1a3 3 0 0 0 4.2 4.2l1.8-1.8"/><path d="M16 11.7l1.8-1.8a3 3 0 0 0-4.2-4.2l-1.8 1.8"/>`),
   grip: ISVG(`<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>`),
+  bell: ISVG(`<path d="M6 10.5a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5Z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/>`),
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -631,12 +632,13 @@ function defaultState(){
     settings:{ theme:'vintage', workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
       music:{ enabled:false, volume:0.5, fileName:'' },
       leaderboardSync:{ supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY },
-      stickyPos:null },
+      stickyPos:null, lastSeenAnnouncementId:null },
     subjects:[],
     sessions:[], // {id, subjectId, minutes, date, type}
     notes:[], // {id, subjectId, title, body, updatedAt}
     achievementsUnlocked:[],
     pomodoroCount:0,
+    lastSeenNotifAt:null,
     sticky:{ targetHours:2, todos:[] }, // {id, text, done}
     customAchievements:[], // {id, title, desc, metric, target, unlocked, unlockedAt}
     leaderboard:{
@@ -772,7 +774,7 @@ function currentStreak(){
 }
 function logSession(subjectId, minutes, type){
   if(minutes <= 0) return;
-  state.sessions.push({id:uid(), subjectId: subjectId||null, minutes, date: todayStr(), type});
+  state.sessions.push({id:uid(), subjectId: subjectId||null, minutes, date: todayStr(), type, completedAt: new Date().toISOString()});
   if(type==='pomodoro') state.pomodoroCount++;
   save();
   checkAchievements();
@@ -1137,6 +1139,7 @@ function wireStickyNote(suffix){
         if(t){ t.done = cb.checked; save(); }
         const span = cb.nextElementSibling;
         if(span) span.classList.toggle('done', cb.checked);
+        if(cb.checked && t) notifyTaskDone(t.text);
       });
     });
     todosWrap.querySelectorAll('[data-remove]').forEach(btn=>{
@@ -1364,7 +1367,7 @@ function renderDashboard(main){
   showBetaBanner = false; // shown once per real page load — navigating back here won't bring it back
   document.getElementById('goPomo').addEventListener('click', ()=>{ currentPage='pomodoro'; renderNav(); renderMain(); });
   document.getElementById('goNote').addEventListener('click', ()=>{ currentPage='notes'; renderNav(); renderMain(); setTimeout(openNoteEditor,0); });
-  if(leaderboardSyncReady()){ pushMyDailyMinutes(); refreshLbCache(); }
+  if(leaderboardSyncReady()){ pushMyDailyMinutes(); refreshLbCache(); checkForNewAnnouncement(); }
 }
 
 /* ============ PAGE CHROME (tab title, favicon badge, background notification) ============ */
@@ -1890,7 +1893,7 @@ function wireChapterPanel(subject, panelEl){
   panelEl.querySelectorAll('input[type=checkbox]').forEach(cb=>{
     cb.addEventListener('change', ()=>{
       const ch = subject.chapters.find(c=>c.id===cb.dataset.ch);
-      if(ch){ ch.done = cb.checked; save(); checkAchievements(); }
+      if(ch){ ch.done = cb.checked; save(); checkAchievements(); if(cb.checked) notifyTaskDone(ch.name); }
       renderMain();
     });
   });
@@ -2458,6 +2461,44 @@ function leaderboardSyncReady(){
 }
 let lbCache = { rows:[], challenges:[], loaded:false, error:null };
 
+/* ============ ADMIN ANNOUNCEMENTS ============ */
+/* One-way broadcast: only whoever has the admin code can post, everyone else just
+   receives it as a notification the next time they open the app. Reuses the same
+   Supabase project as the leaderboard — needs one extra table (see Settings → Admin
+   for the exact SQL). Change ADMIN_CODE to something private before you publish. */
+const ADMIN_CODE = 'studium-admin-2026';
+let isAdminUnlocked = false;
+async function fetchLatestAnnouncement(){
+  const client = getSbClient();
+  if(!client) return { row:null, error:'Leaderboard sync isn\'t connected.' };
+  try{
+    const { data, error } = await client.from('announcements').select('*').order('created_at', { ascending:false }).limit(1);
+    if(error) return { row:null, error:error.message };
+    return { row: (data && data[0]) || null, error:null };
+  }catch(e){ return { row:null, error: e.message || 'Network error' }; }
+}
+async function checkForNewAnnouncement(){
+  if(!leaderboardSyncReady()) return;
+  const { row } = await fetchLatestAnnouncement();
+  if(!row || state.settings.lastSeenAnnouncementId === row.id) return;
+  state.settings.lastSeenAnnouncementId = row.id;
+  save();
+  sfxAchievement();
+  toast('📣 ' + row.message);
+  if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification('Studium update', { body: row.message, tag:'studium-announcement' }); }catch(e){}
+  }
+}
+async function postAnnouncement(message){
+  const client = getSbClient();
+  if(!client) return { error:'Leaderboard sync must be connected first.' };
+  try{
+    const { error } = await client.from('announcements').insert({ message, created_by: state.profile.name });
+    if(error) return { error:error.message };
+    return { error:null };
+  }catch(e){ return { error: e.message || 'Network error' }; }
+}
+
 async function pushMyPlayerRow(){
   if(!leaderboardSyncReady()) return;
   const client = getSbClient();
@@ -2748,6 +2789,13 @@ function celebrateGoal(title){
   }
   toast('Achievement unlocked: '+title);
 }
+function notifyTaskDone(name){
+  sfxStopwatchStop();
+  if(state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification('Task complete', {body:name}); }catch(e){}
+  }
+  toast('✓ Done: ' + name);
+}
 function checkAchievements(){
   let changed = false;
   ACHIEVEMENTS.forEach(a=>{
@@ -2980,6 +3028,21 @@ function renderSettings(main){
       <p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Only your display name, profile photo, and today's total minutes are ever sent — nothing about your notes, subjects, or session history leaves this device.</p>
     </div>
     <div class="card">
+      <h3 style="font-size:15px; margin-bottom:10px;">Admin</h3>
+      ${isAdminUnlocked ? `
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Post a short update — everyone who opens this app will get it as a notification.</p>
+        <div class="field"><label>Message</label><textarea id="announceText" placeholder="e.g. New Challenges feature just shipped — try it out!" style="min-height:70px;"></textarea></div>
+        <button class="btn btn-primary" id="announceSendBtn">Send to Everyone</button>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:8px;" id="announceStatus"></p>
+      ` : `
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Enter the admin code to post an update to everyone using this app.</p>
+        <div class="row">
+          <input type="password" id="adminCodeInput" placeholder="Admin code" style="flex:1;">
+          <button class="btn btn-sm" id="adminUnlockBtn">Unlock</button>
+        </div>
+      `}
+    </div>
+    <div class="card">
       <h3 style="font-size:15px; margin-bottom:14px;">Your Data</h3>
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Everything you track — sessions, notes, subjects — is stored only in this browser. The one exception is the Leaderboard above, if connected.</p>
       <div class="row" style="margin-bottom:10px;">
@@ -3003,6 +3066,25 @@ function renderSettings(main){
     statusEl.textContent = '🟢 Connected — your name, photo, and today\'s minutes sync automatically.';
     toast('Leaderboard connected');
     pushMyPlayerRow(); pushMyDailyMinutes();
+  });
+  const adminUnlockBtn = document.getElementById('adminUnlockBtn');
+  if(adminUnlockBtn) adminUnlockBtn.addEventListener('click', ()=>{
+    const code = document.getElementById('adminCodeInput').value;
+    if(code === ADMIN_CODE){ isAdminUnlocked = true; renderMain(); toast('Admin unlocked'); }
+    else toast('Incorrect code');
+  });
+  const announceSendBtn = document.getElementById('announceSendBtn');
+  if(announceSendBtn) announceSendBtn.addEventListener('click', async ()=>{
+    const msg = document.getElementById('announceText').value.trim();
+    const statusEl = document.getElementById('announceStatus');
+    if(!msg){ toast('Write a message first'); return; }
+    announceSendBtn.textContent = 'Sending…'; announceSendBtn.disabled = true;
+    const { error } = await postAnnouncement(msg);
+    announceSendBtn.textContent = 'Send to Everyone'; announceSendBtn.disabled = false;
+    if(error){ statusEl.textContent = 'Could not send — ' + error; return; }
+    statusEl.textContent = 'Sent!';
+    document.getElementById('announceText').value = '';
+    toast('Update posted');
   });
   document.getElementById('darkSwitch').addEventListener('change', e=>{ setTheme(e.target.checked ? 'cyber' : 'vintage'); });
   document.getElementById('notifSwitch').addEventListener('change', async e=>{
