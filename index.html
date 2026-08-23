@@ -643,6 +643,38 @@ const ICONS = {
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+/* Avatars only ever render at up to 56px (see .avatar CSS) but were previously stored at
+   full upload resolution (up to ~2MB, ~2.7MB once base64-encoded) — and re-downloaded in
+   full on every fresh tab/reload since the roster cache is in-memory, not persisted. That's
+   the main driver of Supabase egress usage. This crops to a square, downsizes to a size
+   that still looks sharp even at 3x pixel density, and re-encodes as JPEG, typically
+   producing a 5-25KB result regardless of how large the source photo was. */
+const AVATAR_TARGET_PX = 200;
+const AVATAR_JPEG_QUALITY = 0.85;
+function resizeImageFileToDataUrl(file, targetPx = AVATAR_TARGET_PX, quality = AVATAR_JPEG_QUALITY){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = ()=> reject(new Error('Could not read that image'));
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onerror = ()=> reject(new Error('Could not decode that image'));
+      img.onload = ()=>{
+        try{
+          const side = Math.min(img.naturalWidth, img.naturalHeight);
+          const sx = (img.naturalWidth - side) / 2;
+          const sy = (img.naturalHeight - side) / 2;
+          const canvas = document.createElement('canvas');
+          canvas.width = targetPx; canvas.height = targetPx;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, sx, sy, side, side, 0, 0, targetPx, targetPx);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        }catch(e){ reject(e); }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
 
 /* Pre-connected leaderboard sync — baked in so anyone opening this deployed app is
@@ -1359,8 +1391,9 @@ function renderDashboard(main){
     </div>
     <div class="rank-banner" id="dashRankBanner" style="cursor:pointer;">
       <span class="nav-icon" style="width:20px;height:20px; color:var(--accent-2);">${ICONS.leaderboard}</span>
-      <span class="rank-num">${myLeaderboardRank() ? '#'+myLeaderboardRank() : '—'}</span>
-      <span class="rank-text">on today's leaderboard <strong>· ${fmtMin(todayMins)}</strong> — tap to see the full board</span>
+      ${LEADERBOARD_PAUSED
+        ? `<span class="rank-text">⏸ Leaderboard temporarily paused</span>`
+        : `<span class="rank-num">${myLeaderboardRank() ? '#'+myLeaderboardRank() : '—'}</span><span class="rank-text">on today's leaderboard <strong>· ${fmtMin(todayMins)}</strong> — tap to see the full board</span>`}
     </div>
     <div class="grid grid-2">
       <div class="card">
@@ -2492,9 +2525,18 @@ function getSbClient(){
   }
   return sbClient;
 }
-function leaderboardSyncReady(){
+/* Set to false once the avatar-egress issue is confirmed resolved and it's safe to resume
+   automatic syncing. While true, every network call to Supabase (roster/avatar/minutes
+   fetches, polling, pushes) is skipped — leaderboardSyncReady() is the single gate every
+   one of those call sites already checks before firing, so flipping this one flag is
+   enough to fully pause the feature without touching each call site individually. */
+const LEADERBOARD_PAUSED = true;
+function leaderboardConfigured(){
   const cfg = state.settings.leaderboardSync;
   return !!(normalizeSupabaseUrl(cfg.supabaseUrl) && cfg.supabaseKey && state.profile.name && getSbClient());
+}
+function leaderboardSyncReady(){
+  return !LEADERBOARD_PAUSED && leaderboardConfigured();
 }
 let lbCache = { rows:[], challenges:[], loaded:false, error:null };
 
@@ -2786,6 +2828,14 @@ function startLbPoll(){
   lbPollId = setInterval(()=>{ if(currentPage==='leaderboard') refreshLbCache(); else stopLbPoll(); }, 20000);
 }
 function renderLeaderboard(main){
+  if(LEADERBOARD_PAUSED){
+    main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Compete on daily study hours with friends.</p></div></div>
+    <div class="card" style="max-width:480px;">
+      <h3 style="font-size:16px; margin-bottom:10px;">⏸ Temporarily paused</h3>
+      <p style="font-size:13px; color:var(--text-muted);">The leaderboard is switched off for now while a data-usage issue gets sorted out. Nothing is being sent to or fetched from the server — your local stats keep tracking as normal, they just won't sync until this is turned back on.</p>
+    </div>`;
+    return;
+  }
   if(!leaderboardSyncReady()){
     main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Compete on daily study hours with friends.</p></div></div>
     <div class="card" style="max-width:480px;">
@@ -3108,15 +3158,12 @@ function renderProfile(main){
     e.target.value = '';
     if(!file) return;
     if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
-    if(file.size > 2*1024*1024){ toast('Image is too large (max 2MB)'); return; }
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      state.profile.avatarDataUrl = reader.result;
+    if(file.size > 8*1024*1024){ toast('Image is too large (max 8MB)'); return; }
+    resizeImageFileToDataUrl(file).then(dataUrl=>{
+      state.profile.avatarDataUrl = dataUrl;
       save(); renderNav(); renderMain(); toast('Photo updated');
       if(leaderboardSyncReady()) pushMyPlayerRow();
-    };
-    reader.onerror = ()=> toast('Could not read that image');
-    reader.readAsDataURL(file);
+    }).catch(()=> toast('Could not read that image'));
   });
   const removeBtn = document.getElementById('removePhotoBtn');
   if(removeBtn) removeBtn.addEventListener('click', ()=>{
@@ -3173,11 +3220,15 @@ function renderSettings(main){
     </div>
     <div class="card">
       <h3 style="font-size:15px; margin-bottom:14px;">Leaderboard Sync</h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;" id="lbSyncStatus">${leaderboardSyncReady() ? '🟢 Connected — your name, photo, and today\'s minutes sync automatically.' : '🔴 Not connected.'}</p>
-      <div class="field"><label>Project URL</label><input type="text" id="lbSyncUrl" value="${escapeHtml(state.settings.leaderboardSync.supabaseUrl)}" placeholder="https://xxxxx.supabase.co"></div>
-      <div class="field"><label>Anon Public API Key</label><input type="text" id="lbSyncKey" value="${escapeHtml(state.settings.leaderboardSync.supabaseKey)}" placeholder="eyJhbGciOi..."></div>
-      <button class="btn btn-primary" id="lbSyncSave">Save Connection</button>
-      <p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Only your display name, profile photo, and today's total minutes are ever sent — nothing about your notes, subjects, or session history leaves this device.</p>
+      ${LEADERBOARD_PAUSED ? `
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:0;" id="lbSyncStatus">⏸ Temporarily paused — sync and connection testing are switched off while a data-usage issue is being fixed. Your saved connection settings are untouched and will resume once this is turned back on.</p>
+      ` : `
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;" id="lbSyncStatus">${leaderboardSyncReady() ? '🟢 Connected — your name, photo, and today\'s minutes sync automatically.' : '🔴 Not connected.'}</p>
+        <div class="field"><label>Project URL</label><input type="text" id="lbSyncUrl" value="${escapeHtml(state.settings.leaderboardSync.supabaseUrl)}" placeholder="https://xxxxx.supabase.co"></div>
+        <div class="field"><label>Anon Public API Key</label><input type="text" id="lbSyncKey" value="${escapeHtml(state.settings.leaderboardSync.supabaseKey)}" placeholder="eyJhbGciOi..."></div>
+        <button class="btn btn-primary" id="lbSyncSave">Save Connection</button>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Only your display name, profile photo, and today's total minutes are ever sent — nothing about your notes, subjects, or session history leaves this device.</p>
+      `}
     </div>
     <div class="card">
       <h3 style="font-size:15px; margin-bottom:10px;">Admin</h3>
@@ -3205,7 +3256,8 @@ function renderSettings(main){
       <button class="btn btn-danger" id="resetBtn">Reset All Data</button>
     </div>
   </div>`;
-  document.getElementById('lbSyncSave').addEventListener('click', async ()=>{
+  const lbSyncSaveBtn = document.getElementById('lbSyncSave');
+  if(lbSyncSaveBtn) lbSyncSaveBtn.addEventListener('click', async ()=>{
     const url = document.getElementById('lbSyncUrl').value.trim();
     const key = document.getElementById('lbSyncKey').value.trim();
     state.settings.leaderboardSync = { supabaseUrl:url, supabaseKey:key };
@@ -3333,12 +3385,44 @@ function applyTheme(){
 }
 document.getElementById('darkToggleBtn').addEventListener('click', ()=> setTheme(state.settings.theme==='cyber' ? 'vintage' : 'cyber'));
 
+/* One-time cleanup: anyone who uploaded an avatar before compression was added is still
+   storing (and re-uploading, and every viewer is re-downloading) a full-size image. This
+   silently re-compresses it in place on next load, so the fix reaches existing users
+   without needing a backend migration. Threshold is generous — legitimately small/already-
+   compressed avatars are left untouched. */
+function shrinkExistingAvatarIfTooLarge(){
+  const url = state.profile.avatarDataUrl;
+  if(!url || url.length < 60000) return;
+  const img = new Image();
+  img.onload = ()=>{
+    try{
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const sx = (img.naturalWidth - side) / 2;
+      const sy = (img.naturalHeight - side) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = AVATAR_TARGET_PX; canvas.height = AVATAR_TARGET_PX;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, AVATAR_TARGET_PX, AVATAR_TARGET_PX);
+      const shrunk = canvas.toDataURL('image/jpeg', AVATAR_JPEG_QUALITY);
+      if(shrunk.length < url.length){
+        state.profile.avatarDataUrl = shrunk;
+        save();
+        if(document.getElementById('changePhotoBtn')) renderMain();
+        if(leaderboardSyncReady()) pushMyPlayerRow();
+      }
+    }catch(e){ /* if anything about the existing image can't be decoded, just leave it be */ }
+  };
+  img.onerror = ()=>{};
+  img.src = url;
+}
+
 /* ============ INIT ============ */
 applyTheme();
 restoreLiveTimerState();
 renderNav();
 renderMain();
 checkAchievements();
+shrinkExistingAvatarIfTooLarge();
 </script>
 </body>
 </html>
