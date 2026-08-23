@@ -2540,6 +2540,7 @@ async function postAnnouncement(message){
 async function pushMyPlayerRow(){
   if(!leaderboardSyncReady()) return;
   const client = getSbClient();
+  avatarCache[state.profile.name] = state.profile.avatarDataUrl || null;
   try{
     await client.from('players').upsert({
       name: state.profile.name, avatar_data_url: state.profile.avatarDataUrl || null, updated_at: new Date().toISOString()
@@ -2555,13 +2556,33 @@ async function pushMyDailyMinutes(){
     }, { onConflict:'player_name,study_date' });
   }catch(e){}
 }
+/* Avatars are stored as base64 data URLs (up to ~2.7MB each after a 2MB upload) — fine
+   for a one-time load, but ruinous if re-downloaded on every roster refresh. The roster
+   is re-fetched constantly (every dashboard visit, every leaderboard visit, and every 20s
+   while sitting on the leaderboard page), so avatars are fetched separately and cached
+   per browser session: each player's photo is downloaded once, then reused from memory
+   for every subsequent refresh/poll instead of being re-pulled. */
+let avatarCache = {};
+async function fetchMissingAvatars(names){
+  const missing = [...new Set(names)].filter(n=> !(n in avatarCache));
+  if(!missing.length) return false;
+  const client = getSbClient();
+  if(!client) return false;
+  try{
+    const { data, error } = await client.from('players').select('name,avatar_data_url').in('name', missing);
+    if(error) return false;
+    missing.forEach(n=> avatarCache[n] = null); // mark as resolved even if a name had no row/photo, so we don't re-ask every poll
+    (data||[]).forEach(p=> avatarCache[p.name] = p.avatar_data_url || null);
+    return true;
+  }catch(e){ return false; }
+}
 async function fetchRosterRows(){
   const client = getSbClient();
   if(!client) return { rows:null, error:'Leaderboard isn\'t connected.' };
   try{
     const today = todayStr();
     const [playersRes, minutesRes] = await Promise.all([
-      client.from('players').select('name,avatar_data_url'),
+      client.from('players').select('name'),
       client.from('daily_minutes').select('player_name,minutes').eq('study_date', today)
     ]);
     if(playersRes.error) return { rows:null, error:playersRes.error.message };
@@ -2569,10 +2590,16 @@ async function fetchRosterRows(){
     const minutesByName = {};
     minutesRes.data.forEach(r=> minutesByName[r.player_name] = r.minutes);
     const rows = playersRes.data.map(p=>({
-      name:p.name, avatarDataUrl:p.avatar_data_url, minutes: Math.round(minutesByName[p.name]||0),
+      name:p.name, avatarDataUrl: avatarCache[p.name] || null, minutes: Math.round(minutesByName[p.name]||0),
       isMe: p.name === state.profile.name
     }));
     rows.sort((a,b)=> b.minutes - a.minutes);
+    // Fire-and-forget: only pulls photos for names we've never seen this session (usually
+    // zero after the first load), then patches them into the already-rendered leaderboard.
+    fetchMissingAvatars(rows.map(r=>r.name)).then(gotNew=>{ if(gotNew){
+      rows.forEach(r=>{ if(r.name in avatarCache) r.avatarDataUrl = avatarCache[r.name]; });
+      lbCache.rows = rows; updateLeaderboardDom(); updateDashRankBanner();
+    }});
     return { rows, error:null };
   }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
 }
@@ -2734,7 +2761,7 @@ function competitionCardHtml(comp){
   return `<div class="card comp-card">
     <div class="row" style="justify-content:space-between; margin-bottom:4px;">
       <h3 style="font-size:15px;">${escapeHtml(compTitle(comp))}</h3>
-      <span class="badge">${comp.finished? 'Finished' : `Day ${Math.min(comp.day_index+1,comp.days)} / ${comp.days}`}</span>
+      <span class="badge">${comp.finished? 'Finished' : `Day ${Math.min((comp.day_index||0)+1,comp.days)} / ${comp.days}`}</span>
     </div>
     <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">+5 for the day's top studier, −5 for the rest.</p>
     <div class="comp-standings">
@@ -3086,6 +3113,7 @@ function renderProfile(main){
     reader.onload = ()=>{
       state.profile.avatarDataUrl = reader.result;
       save(); renderNav(); renderMain(); toast('Photo updated');
+      if(leaderboardSyncReady()) pushMyPlayerRow();
     };
     reader.onerror = ()=> toast('Could not read that image');
     reader.readAsDataURL(file);
@@ -3094,10 +3122,12 @@ function renderProfile(main){
   if(removeBtn) removeBtn.addEventListener('click', ()=>{
     state.profile.avatarDataUrl = '';
     save(); renderNav(); renderMain(); toast('Photo removed');
+    if(leaderboardSyncReady()) pushMyPlayerRow();
   });
   document.getElementById('saveProf').addEventListener('click', ()=>{
     state.profile.name = document.getElementById('profName').value.trim() || 'Student';
     save(); renderNav(); renderMain(); toast('Profile updated');
+    if(leaderboardSyncReady()) pushMyPlayerRow();
   });
   document.getElementById('saveDetailsBtn').addEventListener('click', ()=>{
     state.profile.studentId = document.getElementById('profStudentId').value.trim();
@@ -3180,6 +3210,7 @@ function renderSettings(main){
     const key = document.getElementById('lbSyncKey').value.trim();
     state.settings.leaderboardSync = { supabaseUrl:url, supabaseKey:key };
     sbClient = null;
+    avatarCache = {};
     const statusEl = document.getElementById('lbSyncStatus');
     statusEl.textContent = 'Checking…';
     const { error } = await fetchRosterRows();
@@ -3236,9 +3267,12 @@ function renderSettings(main){
       clearLiveTimerState();
       stopPomoInterval(); clearInterval(sw.timerId); sw.timerId=null;
       pomo.running=false; sw.running=false; sw.elapsed=0; pomo.mode='work';
+      stopMusic(); musicAudio.src=''; musicAudio.removeAttribute('src');
+      isAdminUnlocked = false;
       state = defaultState();
       pomo.remaining = pomoDuration('work');
       sbClient = null;
+      avatarCache = {};
       lbCache = { rows:[], challenges:[], loaded:false, error:null };
       applyTheme(); renderNav(); renderMain();
       toast('All data reset');
