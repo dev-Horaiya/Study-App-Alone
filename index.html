@@ -470,6 +470,20 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .avatar-sm{ width:34px; height:34px; font-size:15px; }
 .avatar-xs{ width:26px; height:26px; font-size:12px; }
 .toast{ position:fixed; bottom:24px; right:24px; background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow); border-radius:8px; padding:12px 18px; font-size:13px; z-index:100; opacity:0; transform:translateY(10px); transition:all .25s ease; pointer-events:none;}
+
+/* Floating "join our Messenger group" button — offset from the left edge to clear the
+   sidebar's width at each breakpoint (220px desktop, 180px tablet, off-canvas on mobile
+   so it can sit at the true corner there). */
+.messenger-fab{
+  position:fixed; bottom:24px; left:244px; width:52px; height:52px; border-radius:50%;
+  background:linear-gradient(135deg, #00B2FF 0%, #7A5AF8 55%, #FF6BC1 100%);
+  display:flex; align-items:center; justify-content:center; border:none; cursor:pointer;
+  box-shadow:0 6px 18px rgba(122,90,248,.4); z-index:45; transition:transform .15s ease, box-shadow .15s ease;
+}
+.messenger-fab:hover{ transform:scale(1.08); box-shadow:0 8px 22px rgba(122,90,248,.55); }
+.messenger-fab svg{ width:24px; height:24px; display:block; }
+@media (max-width:900px){ .messenger-fab{ left:204px; } }
+@media (max-width:760px){ .messenger-fab{ left:16px; bottom:16px; width:48px; height:48px; } .messenger-fab svg{ width:22px; height:22px; } }
 .toast.show{ opacity:1; transform:translateY(0); }
 ::-webkit-scrollbar{ width:8px; height:8px; }
 ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
@@ -592,6 +606,9 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
 
 <div class="overlay" id="overlay"><div class="modal" id="modalBody"></div></div>
 <div class="floating-sticky" id="floatingSticky"></div>
+<button class="messenger-fab" id="messengerFabBtn" title="Join our Messenger Group" aria-label="Join our Messenger Group">
+  <svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+</button>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -690,7 +707,7 @@ function defaultState(){
     settings:{ theme:'vintage', workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
       music:{ enabled:false, volume:0.5, fileName:'' },
       leaderboardSync:{ supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY },
-      stickyPos:null, lastSeenAnnouncementId:null, lastAnnouncedTopper:null },
+      stickyPos:null, lastSeenAnnouncementId:null, lastAnnouncedTopper:null, messengerInviteSeen:false },
     subjects:[],
     sessions:[], // {id, subjectId, minutes, date, type}
     notes:[], // {id, subjectId, title, body, updatedAt}
@@ -883,6 +900,27 @@ function confirmAction(message, onConfirm, confirmLabel){
   `);
   document.getElementById('confirmCancel').addEventListener('click', closeModal);
   document.getElementById('confirmOk').addEventListener('click', ()=>{ closeModal(); onConfirm(); });
+}
+
+/* One-time popup inviting people to the Messenger group chat. Shows once ever (for both
+   brand-new and existing users who haven't seen it yet), then never again — tracked via
+   settings.messengerInviteSeen, marked true the moment it's shown so it can't reappear
+   regardless of how it's dismissed (Join, Maybe later, or clicking outside the modal). */
+const MESSENGER_INVITE_LINK = 'https://m.me/j/AbZs866OYpoMwBAk/?send_source=gc%3Acopy_invite_link_t';
+function maybeShowMessengerInvite(){
+  if(state.settings.messengerInviteSeen) return;
+  state.settings.messengerInviteSeen = true;
+  save();
+  openModal(`
+    <h3 style="display:flex; align-items:center; gap:10px;">💬 Join the Studium Group</h3>
+    <p style="font-size:14px; color:var(--text-muted); margin-bottom:20px;">Come say hi on Messenger — swap study tips, hear about new features first, and chat with other people using Studium.</p>
+    <div class="modal-actions">
+      <button class="btn" id="messengerLaterBtn">Maybe later</button>
+      <a class="btn btn-primary" id="messengerJoinBtn" href="${MESSENGER_INVITE_LINK}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; text-align:center;">Join Messenger Group</a>
+    </div>
+  `);
+  document.getElementById('messengerLaterBtn').addEventListener('click', closeModal);
+  document.getElementById('messengerJoinBtn').addEventListener('click', closeModal);
 }
 
 /* ============ HELP & DOCUMENTATION ============ */
@@ -2530,7 +2568,7 @@ function getSbClient(){
    fetches, polling, pushes) is skipped — leaderboardSyncReady() is the single gate every
    one of those call sites already checks before firing, so flipping this one flag is
    enough to fully pause the feature without touching each call site individually. */
-const LEADERBOARD_PAUSED = true;
+const LEADERBOARD_PAUSED = false;
 function leaderboardConfigured(){
   const cfg = state.settings.leaderboardSync;
   return !!(normalizeSupabaseUrl(cfg.supabaseUrl) && cfg.supabaseKey && state.profile.name && getSbClient());
@@ -3423,6 +3461,8 @@ renderNav();
 renderMain();
 checkAchievements();
 shrinkExistingAvatarIfTooLarge();
+maybeShowMessengerInvite();
+document.getElementById('messengerFabBtn').addEventListener('click', ()=> window.open(MESSENGER_INVITE_LINK, '_blank', 'noopener'));
 </script>
 </body>
 </html>
