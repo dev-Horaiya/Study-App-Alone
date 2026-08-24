@@ -2568,7 +2568,7 @@ function getSbClient(){
    fetches, polling, pushes) is skipped — leaderboardSyncReady() is the single gate every
    one of those call sites already checks before firing, so flipping this one flag is
    enough to fully pause the feature without touching each call site individually. */
-const LEADERBOARD_PAUSED = false;
+const LEADERBOARD_PAUSED = true;
 function leaderboardConfigured(){
   const cfg = state.settings.leaderboardSync;
   return !!(normalizeSupabaseUrl(cfg.supabaseUrl) && cfg.supabaseKey && state.profile.name && getSbClient());
