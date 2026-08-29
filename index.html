@@ -484,6 +484,16 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .messenger-fab svg{ width:24px; height:24px; display:block; }
 @media (max-width:900px){ .messenger-fab{ left:204px; } }
 @media (max-width:760px){ .messenger-fab{ left:16px; bottom:16px; width:48px; height:48px; } .messenger-fab svg{ width:22px; height:22px; } }
+
+/* Small persistent YouTube player — stays docked bottom-right and survives page
+   navigation since it lives outside the re-rendered main content area. Kept visible
+   while a track is loaded (not collapsed to zero size), per YouTube's embed terms. */
+.yt-mini-player{ position:fixed; right:16px; bottom:16px; width:200px; background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; box-shadow:var(--shadow-hover); z-index:44; }
+.yt-mini-player-head{ display:flex; align-items:center; justify-content:space-between; padding:5px 9px; font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--text-muted); background:var(--surface-2); }
+.yt-mini-player-head button{ background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:14px; line-height:1; padding:2px; }
+.yt-mini-player-head button:hover{ color:var(--text); }
+#ytMusicPlayer{ width:200px; height:113px; }
+@media (max-width:760px){ .yt-mini-player{ width:160px; } #ytMusicPlayer{ width:160px; height:90px; } }
 .toast.show{ opacity:1; transform:translateY(0); }
 ::-webkit-scrollbar{ width:8px; height:8px; }
 ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
@@ -609,6 +619,13 @@ input[type=range]{ width:100%; accent-color:var(--accent); height:20px; padding:
 <button class="messenger-fab" id="messengerFabBtn" title="Join our Messenger Group" aria-label="Join our Messenger Group">
   <svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
 </button>
+<div class="yt-mini-player" id="ytMiniPlayer" style="display:none;">
+  <div class="yt-mini-player-head">
+    <span>YouTube</span>
+    <button id="ytMiniCloseBtn" title="Stop and hide">✕</button>
+  </div>
+  <div id="ytMusicPlayer"></div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -705,7 +722,7 @@ function defaultState(){
   return {
     profile:{ name:'Student', createdAt: todayStr(), avatarDataUrl:'', studentId:'', institution:'', gradeOrClass:'', fieldOfStudy:'' },
     settings:{ theme:'vintage', workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
-      music:{ enabled:false, volume:0.5, fileName:'' },
+      music:{ enabled:false, volume:0.5, fileName:'', source:'file', youtubeUrl:'', youtubeVideoId:'', youtubeTitle:'' },
       leaderboardSync:{ supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY },
       stickyPos:null, lastSeenAnnouncementId:null, lastAnnouncedTopper:null, messengerInviteSeen:false },
     subjects:[],
@@ -734,7 +751,7 @@ function mergeState(parsed){
     merged.settings.theme = parsed.settings.darkMode ? 'cyber' : 'vintage';
   }
   delete merged.settings.darkMode;
-  merged.settings.music = Object.assign({enabled:false, volume:0.5, fileName:''}, (parsed.settings&&parsed.settings.music)||{});
+  merged.settings.music = Object.assign({enabled:false, volume:0.5, fileName:'', source:'file', youtubeUrl:'', youtubeVideoId:'', youtubeTitle:''}, (parsed.settings&&parsed.settings.music)||{});
   merged.settings.leaderboardSync = Object.assign({supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY}, (parsed.settings&&parsed.settings.leaderboardSync)||{});
   merged.sticky = Object.assign({targetHours:2, todos:[]}, parsed.sticky||{});
   merged.leaderboard = Object.assign({people:[], competitions:[]}, parsed.leaderboard||{});
@@ -1076,7 +1093,83 @@ function sfxStopwatchStop(){ playSequence([[600,0,0.16,'sine',0.13]]); }
 /* Four-note ascending fanfare — celebratory, for unlocking an achievement */
 function sfxAchievement(){ playSequence([[523.25,0,0.1,'triangle',0.14],[659.25,0.09,0.1,'triangle',0.14],[783.99,0.18,0.1,'triangle',0.14],[1046.5,0.27,0.32,'triangle',0.17]]); }
 
-/* ============ BACKGROUND MUSIC PLAYER (user's own library) ============ */
+/* ============ MOBILE BACKGROUND TIMER (lock screen / notification shade) ============
+   Mobile browsers suspend a backgrounded tab's JS almost immediately — there's no way for
+   a plain web page to keep a countdown ticking or push live notification updates once
+   minimized. The one real exception: a tab that's actively playing audio is generally kept
+   alive, and the Media Session API lets that audio session drive a genuine OS-level "Now
+   Playing" widget (lock screen + notification shade) with a title we control and, on most
+   platforms, working play/pause buttons. So: while a Pomodoro or Stopwatch is running, a
+   silent (inaudible, genuinely zero-amplitude) looping track plays purely to keep that
+   session alive, and its metadata is kept in sync with the timer. This is the same trick
+   most web-based timer/Pomodoro apps use — it's not a fake, it's the closest real
+   equivalent to a native "phone timer" notification available to a web page. Two caveats
+   worth knowing: (1) a small speaker icon will show on the browser tab while this plays —
+   unavoidable, since that's the browser correctly reporting that audio is active; (2) iOS
+   Safari is far stricter about background execution than Android Chrome, so the lock
+   screen widget itself tends to show up reliably, but exact per-second updates while fully
+   backgrounded aren't guaranteed there the way they are on Android. */
+let tickAliveAudio = null;
+function silentLoopAudioUrl(){
+  const sampleRate = 8000, seconds = 1, numSamples = sampleRate*seconds, headerLen = 44;
+  const buffer = new ArrayBuffer(headerLen + numSamples);
+  const view = new DataView(buffer);
+  const writeStr = (offset,str)=>{ for(let i=0;i<str.length;i++) view.setUint8(offset+i, str.charCodeAt(i)); };
+  writeStr(0,'RIFF'); view.setUint32(4, 36+numSamples, true); writeStr(8,'WAVE');
+  writeStr(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true);
+  view.setUint32(24,sampleRate,true); view.setUint32(28,sampleRate,true); view.setUint16(32,1,true); view.setUint16(34,8,true);
+  writeStr(36,'data'); view.setUint32(40,numSamples,true);
+  for(let i=0;i<numSamples;i++) view.setUint8(headerLen+i, 128); // 128 = silence for 8-bit unsigned PCM
+  return URL.createObjectURL(new Blob([buffer], { type:'audio/wav' }));
+}
+function ensureKeepAliveAudio(){
+  if(!tickAliveAudio){ tickAliveAudio = new Audio(silentLoopAudioUrl()); tickAliveAudio.loop = true; }
+  if(tickAliveAudio.paused) tickAliveAudio.play().catch(()=>{}); // needs a user gesture the first time — start/pause taps qualify
+}
+function stopKeepAliveAudioIfIdle(){
+  if(!pomo.running && !sw.running && tickAliveAudio && !tickAliveAudio.paused) tickAliveAudio.pause();
+}
+function activeControllableTimer(){
+  if(pomo.running) return 'pomo';
+  if(sw.running) return 'sw';
+  return null;
+}
+function updateMediaSessionForTimer(status){
+  if(!('mediaSession' in navigator)) return;
+  if(status){
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: status.title.replace(' — Studium',''),
+      artist: 'Studium',
+      album: status.badge==='stopwatch' ? 'Stopwatch' : (status.badge==='break' ? 'Break' : 'Focus Session'),
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  } else {
+    navigator.mediaSession.metadata = null;
+    navigator.mediaSession.playbackState = 'none';
+  }
+}
+function wireMediaSessionActions(){
+  if(!('mediaSession' in navigator)) return;
+  const toggleActive = ()=>{
+    const t = activeControllableTimer();
+    if(t==='pomo') togglePomo();
+    else if(t==='sw') toggleSw();
+  };
+  try{
+    navigator.mediaSession.setActionHandler('play', toggleActive);
+    navigator.mediaSession.setActionHandler('pause', toggleActive);
+  }catch(e){}
+}
+
+/* ============ BACKGROUND MUSIC PLAYER (own files, or a YouTube link) ============
+   Two independent sources, switched via settings.music.source:
+   - 'file': the user's own audio file, played through a local <audio> element.
+   - 'youtube': a video played through YouTube's own official IFrame Player API — the
+     one feature in this app that needs an internet connection and talks to a service
+     besides Supabase. The player itself lives in the small persistent #ytMiniPlayer
+     widget in the body (not inside a page), so it isn't destroyed and doesn't stop
+     playing when you navigate between pages. It stays visibly docked while a track is
+     loaded, which YouTube's embed terms require — this isn't optional chrome. */
 const musicAudio = new Audio();
 musicAudio.loop = true;
 musicAudio.volume = state.settings.music.volume;
@@ -1096,13 +1189,95 @@ function handleMusicFile(file){
     musicAudio.pause();
     musicAudio.src = reader.result; // data: URL — more reliably permitted than blob: in sandboxed previews
     state.settings.music.fileName = file.name;
+    state.settings.music.source = 'file';
     save();
+    showYtMiniPlayer(false);
     playMusicNow();
   };
   reader.onerror = ()=>{ setMusicStatus('Could not read that file. Try a different track.', true); };
   reader.readAsDataURL(file);
 }
+
+/* ---- YouTube ---- */
+let ytApiReady = false, ytApiLoading = false, ytApiReadyCallbacks = [];
+function loadYouTubeApi(cb){
+  if(ytApiReady){ cb(); return; }
+  ytApiReadyCallbacks.push(cb);
+  if(ytApiLoading) return;
+  ytApiLoading = true;
+  window.onYouTubeIframeAPIReady = ()=>{ ytApiReady = true; ytApiReadyCallbacks.forEach(f=>f()); ytApiReadyCallbacks = []; };
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  tag.onerror = ()=> setMusicStatus('Could not reach YouTube — check your connection.', true);
+  document.head.appendChild(tag);
+}
+function extractYouTubeId(input){
+  if(!input) return null;
+  const raw = input.trim();
+  if(/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw; // a bare video ID pasted directly
+  try{
+    const u = new URL(raw);
+    if(u.hostname === 'youtu.be') return (u.pathname.slice(1).split('/')[0]) || null;
+    if(u.hostname.includes('youtube.com')){
+      if(u.pathname === '/watch') return u.searchParams.get('v');
+      const m = u.pathname.match(/\/(embed|shorts|live)\/([^/?]+)/);
+      if(m) return m[2];
+    }
+  }catch(e){}
+  return null;
+}
+let ytPlayer = null, ytPlayerReady = false;
+function isMusicPlayingNow(){
+  if(state.settings.music.source === 'youtube') return !!(ytPlayer && ytPlayerReady && ytPlayer.getPlayerState && ytPlayer.getPlayerState() === 1);
+  return !musicAudio.paused;
+}
+function showYtMiniPlayer(show){
+  const el = document.getElementById('ytMiniPlayer');
+  if(el) el.style.display = show ? 'block' : 'none';
+}
+function ensureYtPlayer(videoId, onReady){
+  if(!document.getElementById('ytMusicPlayer')) return;
+  loadYouTubeApi(()=>{
+    if(ytPlayer && ytPlayerReady){ ytPlayer.loadVideoById(videoId); if(onReady) onReady(); return; }
+    if(ytPlayer) return; // already under construction — its own onReady will fire shortly
+    ytPlayer = new YT.Player('ytMusicPlayer', {
+      height: '100%', width: '100%', videoId: videoId,
+      playerVars: { rel: 0, playsinline: 1 },
+      events: {
+        onReady: ()=>{
+          ytPlayerReady = true;
+          ytPlayer.setVolume(Math.round(state.settings.music.volume*100));
+          if(onReady) onReady();
+          refreshMusicButton();
+        },
+        onStateChange: ()=> refreshMusicButton(),
+        onError: ()=> setMusicStatus('Could not play that video — it may be private, region-locked, or blocked from being embedded.', true)
+      }
+    });
+  });
+}
+function loadYouTubeTrack(url){
+  const videoId = extractYouTubeId(url);
+  if(!videoId){ setMusicStatus('That doesn\'t look like a valid YouTube link.', true); return; }
+  state.settings.music.source = 'youtube';
+  state.settings.music.youtubeUrl = url.trim();
+  state.settings.music.youtubeVideoId = videoId;
+  save();
+  showYtMiniPlayer(true);
+  setMusicStatus('Loading video…', false);
+  ensureYtPlayer(videoId, ()=>{ setMusicStatus('Ready — press Play.', false); refreshMusicPanelIfOpen(); });
+}
+
+/* ---- Unified controls (route to whichever source is active) ---- */
 function playMusicNow(){
+  if(state.settings.music.source === 'youtube'){
+    if(!state.settings.music.youtubeVideoId){ setMusicStatus('Paste a YouTube link first.', true); return; }
+    showYtMiniPlayer(true);
+    if(ytPlayer && ytPlayerReady) ytPlayer.playVideo();
+    else ensureYtPlayer(state.settings.music.youtubeVideoId, ()=> ytPlayer.playVideo());
+    refreshMusicButton();
+    return;
+  }
   if(!musicAudio.src){ setMusicStatus('Choose a track first.', true); return; }
   musicAudio.play().then(()=>{
     setMusicStatus('Now playing: ' + state.settings.music.fileName, false);
@@ -1112,14 +1287,20 @@ function playMusicNow(){
     refreshMusicButton();
   });
 }
-function pauseMusicNow(){ musicAudio.pause(); setMusicStatus('Paused.', false); refreshMusicButton(); }
-function toggleMusicPlay(){ musicAudio.paused ? playMusicNow() : pauseMusicNow(); }
+function pauseMusicNow(){
+  if(state.settings.music.source === 'youtube'){ if(ytPlayer && ytPlayerReady) ytPlayer.pauseVideo(); }
+  else musicAudio.pause();
+  setMusicStatus('Paused.', false);
+  refreshMusicButton();
+}
+function toggleMusicPlay(){ isMusicPlayingNow() ? pauseMusicNow() : playMusicNow(); }
 function refreshMusicButton(){
   const btn = document.getElementById('musicPlayBtn');
   if(!btn) return;
-  btn.innerHTML = musicAudio.paused
-    ? `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.play}</span>Play`
-    : `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.pause}</span>Pause`;
+  const playing = isMusicPlayingNow();
+  btn.innerHTML = playing
+    ? `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.pause}</span>Pause`
+    : `<span class="nav-icon" style="width:14px;height:14px;">${ICONS.play}</span>Play`;
 }
 musicAudio.addEventListener('play', refreshMusicButton);
 musicAudio.addEventListener('pause', refreshMusicButton);
@@ -1128,26 +1309,60 @@ musicAudio.addEventListener('error', ()=>{
   const err = musicAudio.error;
   setMusicStatus('Couldn\'t play that file' + (err? ' (' + (codes[err.code]||'unknown error') + ')' : '') + '.', true);
 });
-function setMusicAutoplay(on){
-  state.settings.music.enabled = on; save();
+function setMusicAutoplay(on){ state.settings.music.enabled = on; save(); }
+function setMusicVolume(v){
+  state.settings.music.volume = v; save();
+  musicAudio.volume = v;
+  if(ytPlayer && ytPlayerReady) ytPlayer.setVolume(Math.round(v*100));
 }
-function setMusicVolume(v){ state.settings.music.volume = v; musicAudio.volume = v; save(); }
-function playMusicIfEnabled(){ if(state.settings.music.enabled && musicAudio.src) musicAudio.play().catch(()=>{}); }
-function pauseMusic(){ musicAudio.pause(); }
-function stopMusic(){ musicAudio.pause(); musicAudio.currentTime = 0; }
+function playMusicIfEnabled(){
+  if(!state.settings.music.enabled) return;
+  if(state.settings.music.source === 'youtube'){ if(state.settings.music.youtubeVideoId) playMusicNow(); }
+  else if(musicAudio.src) musicAudio.play().catch(()=>{});
+}
+function pauseMusic(){
+  if(state.settings.music.source === 'youtube'){ if(ytPlayer && ytPlayerReady) ytPlayer.pauseVideo(); }
+  else musicAudio.pause();
+}
+function stopMusic(){
+  if(state.settings.music.source === 'youtube'){ if(ytPlayer && ytPlayerReady) ytPlayer.pauseVideo(); }
+  musicAudio.pause(); musicAudio.currentTime = 0;
+}
+function refreshMusicPanelIfOpen(){
+  const card = document.getElementById('musicPanelCard');
+  if(card){ card.outerHTML = musicPanelHtml(); wireMusicPanel(); }
+}
 function musicPanelHtml(){
   const m = state.settings.music;
-  return `<div class="card" style="margin-top:16px;">
+  const isYt = m.source === 'youtube';
+  return `<div class="card" id="musicPanelCard" style="margin-top:16px;">
     <h3 style="font-size:15px; margin-bottom:6px; display:flex; align-items:center; gap:8px;"><span class="nav-icon" style="width:16px;height:16px;">${ICONS.music}</span>Background Music Player</h3>
-    <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Loop a track from your own device while you work. Nothing is uploaded — it's read straight from your files.</p>
+    <div class="row" style="margin-bottom:12px; gap:6px;">
+      <button class="btn btn-sm ${!isYt?'btn-primary':''}" id="musicSrcFileBtn" type="button">My Files</button>
+      <button class="btn btn-sm ${isYt?'btn-primary':''}" id="musicSrcYtBtn" type="button">YouTube</button>
+    </div>
+    ${isYt ? `
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Paste a YouTube link to play it through YouTube's own player. Needs an internet connection, and the player stays visible in the corner while it plays — that's a requirement of YouTube's terms, not a bug.</p>
+      <div class="field" style="margin-bottom:12px;">
+        <label>YouTube link</label>
+        <div class="row" style="gap:6px;">
+          <input type="text" id="musicYtUrl" placeholder="https://youtube.com/watch?v=..." value="${escapeHtml(m.youtubeUrl)}" style="flex:1;">
+          <button class="btn btn-sm btn-primary" id="musicYtLoadBtn" type="button">Load</button>
+        </div>
+      </div>
+    ` : `
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Loop a track from your own device while you work. Nothing is uploaded — it's read straight from your files.</p>
+      <div class="row" style="margin-bottom:14px;">
+        <button class="btn btn-sm" id="pickMusicBtn"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.music}</span>Choose from library</button>
+        <input type="file" id="musicFile" accept="audio/*" style="display:none;">
+      </div>
+    `}
     <div class="row" style="margin-bottom:14px;">
-      <button class="btn btn-sm" id="pickMusicBtn"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.music}</span>Choose from library</button>
-      <input type="file" id="musicFile" accept="audio/*" style="display:none;">
       <button class="btn btn-sm btn-primary" id="musicPlayBtn">
-        <span class="nav-icon" style="width:14px;height:14px;">${musicAudio.paused?ICONS.play:ICONS.pause}</span>${musicAudio.paused?'Play':'Pause'}
+        <span class="nav-icon" style="width:14px;height:14px;">${isMusicPlayingNow()?ICONS.pause:ICONS.play}</span>${isMusicPlayingNow()?'Pause':'Play'}
       </button>
     </div>
-    <p style="font-size:12px; margin-bottom:14px; color:${musicStatusError?'var(--danger)':'var(--text-muted)'};" id="musicStatus">${escapeHtml(m.fileName && !musicStatusError ? 'Track: '+m.fileName : musicStatusText)}</p>
+    <p style="font-size:12px; margin-bottom:14px; color:${musicStatusError?'var(--danger)':'var(--text-muted)'};" id="musicStatus">${escapeHtml(isYt ? musicStatusText : (m.fileName && !musicStatusError ? 'Track: '+m.fileName : musicStatusText))}</p>
     <div class="field" style="margin-bottom:12px;"><label>Volume</label><input type="range" id="musicVolume" min="0" max="1" step="0.05" value="${m.volume}"></div>
     <div class="row" style="justify-content:space-between;">
       <span style="font-size:13px;">Auto-play when I start a timer</span>
@@ -1156,8 +1371,25 @@ function musicPanelHtml(){
   </div>`;
 }
 function wireMusicPanel(){
-  document.getElementById('pickMusicBtn').addEventListener('click', ()=> document.getElementById('musicFile').click());
-  document.getElementById('musicFile').addEventListener('change', e=>{ handleMusicFile(e.target.files[0]); e.target.value=''; });
+  const srcFileBtn = document.getElementById('musicSrcFileBtn');
+  const srcYtBtn = document.getElementById('musicSrcYtBtn');
+  if(srcFileBtn) srcFileBtn.addEventListener('click', ()=>{
+    if(state.settings.music.source === 'file') return;
+    state.settings.music.source = 'file'; save(); refreshMusicPanelIfOpen();
+  });
+  if(srcYtBtn) srcYtBtn.addEventListener('click', ()=>{
+    if(state.settings.music.source === 'youtube') return;
+    state.settings.music.source = 'youtube'; save(); refreshMusicPanelIfOpen();
+    if(state.settings.music.youtubeVideoId) showYtMiniPlayer(true);
+  });
+  const pickBtn = document.getElementById('pickMusicBtn');
+  if(pickBtn) pickBtn.addEventListener('click', ()=> document.getElementById('musicFile').click());
+  const fileInput = document.getElementById('musicFile');
+  if(fileInput) fileInput.addEventListener('change', e=>{ handleMusicFile(e.target.files[0]); e.target.value=''; });
+  const ytUrlInput = document.getElementById('musicYtUrl');
+  const ytLoadBtn = document.getElementById('musicYtLoadBtn');
+  if(ytLoadBtn) ytLoadBtn.addEventListener('click', ()=> loadYouTubeTrack(ytUrlInput.value));
+  if(ytUrlInput) ytUrlInput.addEventListener('keydown', e=>{ if(e.key==='Enter') loadYouTubeTrack(ytUrlInput.value); });
   document.getElementById('musicPlayBtn').addEventListener('click', toggleMusicPlay);
   document.getElementById('musicVolume').addEventListener('input', e=> setMusicVolume(parseFloat(e.target.value)));
   document.getElementById('musicAutoplay').addEventListener('change', e=> setMusicAutoplay(e.target.checked));
@@ -1532,10 +1764,11 @@ function updatePageChrome(){
   const status = activeTimerStatus();
   document.title = status ? status.title : 'Studium — Study Tracker';
   setFaviconBadge(status ? status.badge : null);
+  updateMediaSessionForTimer(status);
   if(status && document.hidden && state.settings.notifications && 'Notification' in window && Notification.permission==='granted'){
-    const curMin = Math.floor(Date.now()/60000);
-    if(lastBgNotifyMinute !== curMin){
-      lastBgNotifyMinute = curMin;
+    const curTick = Math.floor(Date.now()/15000);
+    if(lastBgNotifyMinute !== curTick){
+      lastBgNotifyMinute = curTick;
       try{ new Notification(status.title.replace(' — Studium',''), { body: status.body, tag:'studium-timer-status', silent:true }); }catch(e){}
     }
   } else if(!status){
@@ -1623,6 +1856,7 @@ function restoreLiveTimerState(){
         } else {
           pomo.running = true;
           startPomoInterval();
+          ensureKeepAliveAudio();
         }
       }
     } else {
@@ -1637,6 +1871,7 @@ function restoreLiveTimerState(){
       sw.running = true;
       sw.startedAt = now - sw.elapsed;
       startSwInterval();
+      ensureKeepAliveAudio();
     } else {
       sw.elapsed = data.sw.elapsed;
       sw.running = false;
@@ -1851,11 +2086,13 @@ function togglePomo(){
   if(pomo.running){
     sfxStart();
     playMusicIfEnabled();
+    ensureKeepAliveAudio();
     startPomoInterval();
   } else {
     syncPomoRemaining(); // lock in the true value at the exact instant of pausing
     stopPomoInterval();
     pauseMusic();
+    stopKeepAliveAudioIfIdle();
   }
   updatePomoUI();
 }
@@ -1882,6 +2119,7 @@ function completePomoCycle(skipped){
   pomo.running = false;
   pomo.targetEndAt = null;
   pauseMusic();
+  stopKeepAliveAudioIfIdle();
   updatePomoUI();
   if(currentPage==='pomodoro'){
     document.getElementById('pomoDoneCount').textContent = state.sessions.filter(s=>s.date===todayStr() && s.type==='pomodoro').length;
@@ -1936,6 +2174,7 @@ function renderStopwatch(main){
     if(mins > 0.05) { logSession(sw.subjectId, mins, 'stopwatch'); sfxStopwatchStop(); toast('Session logged: '+fmtMin(mins)); }
     clearInterval(sw.timerId); sw.timerId=null; sw.running=false; sw.elapsed=0;
     stopMusic();
+    stopKeepAliveAudioIfIdle();
     updateSwUI();
   });
   const swPipBtn = document.getElementById('swPipBtn');
@@ -1952,10 +2191,12 @@ function toggleSw(){
     sw.running = true; sw.startedAt = Date.now() - sw.elapsed;
     sfxStart();
     playMusicIfEnabled();
+    ensureKeepAliveAudio();
     startSwInterval();
   } else {
     sw.running = false; clearInterval(sw.timerId); sw.timerId=null;
     pauseMusic();
+    stopKeepAliveAudioIfIdle();
   }
   updateSwUI();
 }
@@ -2568,7 +2809,7 @@ function getSbClient(){
    fetches, polling, pushes) is skipped — leaderboardSyncReady() is the single gate every
    one of those call sites already checks before firing, so flipping this one flag is
    enough to fully pause the feature without touching each call site individually. */
-const LEADERBOARD_PAUSED = true;
+const LEADERBOARD_PAUSED = false;
 function leaderboardConfigured(){
   const cfg = state.settings.leaderboardSync;
   return !!(normalizeSupabaseUrl(cfg.supabaseUrl) && cfg.supabaseKey && state.profile.name && getSbClient());
@@ -2638,10 +2879,10 @@ async function pushMyDailyMinutes(){
 }
 /* Avatars are stored as base64 data URLs (up to ~2.7MB each after a 2MB upload) — fine
    for a one-time load, but ruinous if re-downloaded on every roster refresh. The roster
-   is re-fetched constantly (every dashboard visit, every leaderboard visit, and every 20s
-   while sitting on the leaderboard page), so avatars are fetched separately and cached
-   per browser session: each player's photo is downloaded once, then reused from memory
-   for every subsequent refresh/poll instead of being re-pulled. */
+   is re-fetched constantly (every dashboard visit, every leaderboard visit, and every
+   LB_POLL_INTERVAL_MS while sitting on the leaderboard page), so avatars are fetched
+   separately and cached per browser session: each player's photo is downloaded once,
+   then reused from memory for every subsequent refresh/poll instead of being re-pulled. */
 let avatarCache = {};
 async function fetchMissingAvatars(names){
   const missing = [...new Set(names)].filter(n=> !(n in avatarCache));
@@ -2860,10 +3101,11 @@ function competitionCardHtml(comp){
   </div>`;
 }
 let lbPollId = null;
+const LB_POLL_INTERVAL_MS = 2 * 60 * 1000; // was 20s — widened to cut egress from repeated roster refreshes
 function stopLbPoll(){ if(lbPollId){ clearInterval(lbPollId); lbPollId=null; } }
 function startLbPoll(){
   stopLbPoll();
-  lbPollId = setInterval(()=>{ if(currentPage==='leaderboard') refreshLbCache(); else stopLbPoll(); }, 20000);
+  lbPollId = setInterval(()=>{ if(currentPage==='leaderboard') refreshLbCache(); else stopLbPoll(); }, LB_POLL_INTERVAL_MS);
 }
 function renderLeaderboard(main){
   if(LEADERBOARD_PAUSED){
@@ -2882,7 +3124,7 @@ function renderLeaderboard(main){
     </div>`;
     return;
   }
-  main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Today's study time, ranked. Highest wins the day.</p></div></div>
+  main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Today's study time, ranked. Highest wins the day. Refreshes every 2 minutes while you're on this page.</p></div></div>
   <div class="grid grid-2">
     <div class="card" style="align-self:start;">
       <h3 style="font-size:16px; margin-bottom:12px;">Today's Ranking</h3>
@@ -3358,6 +3600,8 @@ function renderSettings(main){
       stopPomoInterval(); clearInterval(sw.timerId); sw.timerId=null;
       pomo.running=false; sw.running=false; sw.elapsed=0; pomo.mode='work';
       stopMusic(); musicAudio.src=''; musicAudio.removeAttribute('src');
+      showYtMiniPlayer(false);
+      if(tickAliveAudio) tickAliveAudio.pause();
       isAdminUnlocked = false;
       state = defaultState();
       pomo.remaining = pomoDuration('work');
@@ -3456,6 +3700,7 @@ function shrinkExistingAvatarIfTooLarge(){
 
 /* ============ INIT ============ */
 applyTheme();
+wireMediaSessionActions();
 restoreLiveTimerState();
 renderNav();
 renderMain();
@@ -3463,6 +3708,11 @@ checkAchievements();
 shrinkExistingAvatarIfTooLarge();
 maybeShowMessengerInvite();
 document.getElementById('messengerFabBtn').addEventListener('click', ()=> window.open(MESSENGER_INVITE_LINK, '_blank', 'noopener'));
+document.getElementById('ytMiniCloseBtn').addEventListener('click', ()=>{
+  if(ytPlayer && ytPlayerReady) ytPlayer.pauseVideo();
+  showYtMiniPlayer(false);
+  refreshMusicButton();
+});
 </script>
 </body>
 </html>
