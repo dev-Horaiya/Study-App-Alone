@@ -2979,6 +2979,7 @@ function updateLeaderboardDom(){
     compListEl.innerHTML = (active.length ? active.map(competitionCardHtml).join('') : `<div class="card empty"><h3>No active challenges</h3><p>Pick a rival and race them for a few days.</p></div>`)
       + (finished.length ? `<details style="margin-top:4px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--text-muted); font-weight:600;">Past Challenges (${finished.length})</summary><div style="display:flex; flex-direction:column; gap:14px; margin-top:12px;">${finished.map(competitionCardHtml).join('')}</div></details>` : '');
     compListEl.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleOneChallengeCatchUp(lbCache.challenges.find(c=>c.id===b.dataset.settleComp)).then(refreshLbCache)));
+    compListEl.querySelectorAll('[data-delete-comp]').forEach(b=> b.addEventListener('click', ()=> deleteChallenge(b.dataset.deleteComp)));
   }
   const statusEl = document.getElementById('lbStatus');
   if(statusEl) statusEl.textContent = lbCache.error ? ('Couldn\'t refresh — ' + lbCache.error) : ('Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
@@ -3079,6 +3080,18 @@ function openNewCompetitionModal(){
    client last saw. Whoever gets there first wins the write; everyone else's update
    matches nothing, no-ops safely, and they just pick up the result on their next
    refresh — same end state either way, no double-counting. */
+async function deleteChallenge(compId){
+  const comp = lbCache.challenges.find(c=>c.id===compId);
+  if(!comp) return;
+  confirmAction(`Delete "${compTitle(comp)}"? This can't be undone.`, async ()=>{
+    const client = getSbClient();
+    const { error } = await client.from('challenges').delete().eq('id', compId);
+    if(error){ toast('Could not delete — ' + error.message); return; }
+    lbCache.challenges = lbCache.challenges.filter(c=>c.id!==compId);
+    toast('Challenge deleted');
+    updateLeaderboardDom();
+  });
+}
 async function autoSettleChallenges(){
   if(!leaderboardSyncReady()) return;
   const mine = (lbCache.challenges||[]).filter(c=>!c.finished && c.participant_names.includes(state.profile.name));
@@ -3152,7 +3165,10 @@ function competitionCardHtml(comp){
   return `<div class="card comp-card">
     <div class="row" style="justify-content:space-between; margin-bottom:4px;">
       <h3 style="font-size:15px;">${escapeHtml(compTitle(comp))}</h3>
-      <span class="badge">${comp.finished? 'Finished' : `Day ${Math.min((comp.day_index||0)+1,comp.days)} / ${comp.days}`}</span>
+      <div class="row" style="gap:6px;">
+        <span class="badge">${comp.finished? 'Finished' : `Day ${Math.min((comp.day_index||0)+1,comp.days)} / ${comp.days}`}</span>
+        <button class="icon-btn" data-delete-comp="${comp.id}" title="Delete challenge" aria-label="Delete challenge"><span class="nav-icon" style="width:14px;height:14px;">${ICONS.trash}</span></button>
+      </div>
     </div>
     <p style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">+5 for the day's top studier, −5 for the rest. Settles automatically after each day ends.</p>
     ${strip ? `<div class="comp-day-strip" role="img" aria-label="Recent day-by-day results">${strip}</div>` : ''}
@@ -3217,6 +3233,7 @@ function renderLeaderboard(main){
     </div>
   </div>`;
   document.getElementById('newCompBtn').addEventListener('click', openNewCompetitionModal);
+  document.querySelectorAll('[data-delete-comp]').forEach(b=> b.addEventListener('click', ()=> deleteChallenge(b.dataset.deleteComp)));
   pushMyPlayerRow(); pushMyDailyMinutes();
   refreshLbCache();
   startLbPoll();
