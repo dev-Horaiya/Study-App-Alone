@@ -33,6 +33,7 @@
   --heading-font:'Eczar','Fraunces',serif;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
+html{ overflow-x:hidden; }
 body{
   font-family:'Inter',sans-serif; background:var(--bg); color:var(--text);
   min-height:100vh; transition:background .3s ease, color .3s ease;
@@ -171,6 +172,7 @@ nav{ display:flex; flex-direction:column; gap:2px; flex:1; }
 }
 .card:hover{ transform:translateY(-1px); box-shadow:var(--shadow-hover); border-color:var(--accent-soft); }
 .grid{ display:grid; gap:18px; }
+.grid > *{ min-width:0; } /* let grid items shrink to their track instead of stretching it to fit long unbroken text */
 .grid-2{ grid-template-columns:1fr 1fr; }
 .grid-3{ grid-template-columns:repeat(3,1fr); }
 .grid-4{ grid-template-columns:repeat(4,1fr); }
@@ -230,7 +232,7 @@ nav{ display:flex; flex-direction:column; gap:2px; flex:1; }
 input[type=text], input[type=number], input[type=url], textarea, select{
   width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); color:var(--text); font-size:14px;
 }
-textarea{ resize:vertical; min-height:100px; font-family:'Inter',sans-serif; }
+textarea{ resize:vertical; min-height:100px; font-family:'Inter',sans-serif; overflow-wrap:anywhere; word-break:break-word; }
 label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;}
 .field{ margin-bottom:14px; }
 .row{ display:flex; gap:10px; align-items:center; }
@@ -286,7 +288,7 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 /* Notes */
 .notes-list{ display:flex; flex-direction:column; gap:10px; }
 .note-item{ padding:14px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); cursor:pointer; }
-.note-item h4{ font-size:14px; margin-bottom:4px; font-family:'Inter',sans-serif; font-weight:600;}
+.note-item h4{ font-size:14px; margin-bottom:4px; font-family:'Inter',sans-serif; font-weight:600; overflow-wrap:anywhere; word-break:break-word; }
 .note-item p{ font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .note-item .meta{ font-size:10px; color:var(--text-muted); margin-top:6px; text-transform:uppercase; letter-spacing:.05em;}
 .note-attach-badge{ display:inline-flex; align-items:center; gap:4px; font-size:10px; color:var(--text-muted); margin-top:6px; }
@@ -374,6 +376,12 @@ label{ font-size:12px; font-weight:600; color:var(--text-muted); text-transform:
 .comp-points.neg{ color:var(--danger); }
 .comp-settled-note{ font-size:12px; color:var(--text-muted); text-align:center; padding:6px 0 2px; }
 .comp-winner-note{ font-size:13px; font-weight:600; color:var(--accent-2); text-align:center; padding:6px 0 2px; }
+.comp-day-strip{ display:flex; gap:4px; margin-bottom:10px; }
+.comp-day-dot{ width:16px; height:16px; border-radius:4px; display:inline-block; }
+.comp-day-dot.comp-day-win{ background:var(--accent); }
+.comp-day-dot.comp-day-loss{ background:var(--danger); opacity:.55; }
+.comp-day-dot.comp-day-tie{ background:var(--border); }
+.comp-streak-note{ font-size:12px; font-weight:600; color:var(--accent-2); margin-bottom:10px; }
 
 /* Floating mini sticky note — appears top-left only while a focus sprint or the
    stopwatch is actively running, so it's there when you need it and gone when you don't. */
@@ -710,6 +718,11 @@ function resizeImageFileToDataUrl(file, targetPx = AVATAR_TARGET_PX, quality = A
   });
 }
 function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
+function addDays(dateStr, n){
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0,10);
+}
 
 /* Pre-connected leaderboard sync — baked in so anyone opening this deployed app is
    already talking to the shared Supabase project, no per-person setup required. Still
@@ -2629,7 +2642,7 @@ function viewNoteModal(id){
     <button class="close-x" id="closeM">×</button>
     <h3 style="margin-bottom:4px; padding-right:26px;">${escapeHtml(n.title||'Untitled')}</h3>
     <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:16px;">${subj?escapeHtml(subj.name):'No subject'} · ${n.updatedAt.slice(0,10)}</p>
-    <p style="font-size:14px; white-space:pre-wrap; line-height:1.6; margin-bottom:${atts.length?'18px':'6px'};">${n.body ? escapeHtml(n.body) : '<span style="color:var(--text-muted);">No content.</span>'}</p>
+    <p style="font-size:14px; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; line-height:1.6; margin-bottom:${atts.length?'18px':'6px'};">${n.body ? escapeHtml(n.body) : '<span style="color:var(--text-muted);">No content.</span>'}</p>
     ${atts.length? `<label>Attachments</label><div id="viewAttachList">${attachListHtml(atts, false)}</div>` : ''}
     <div class="modal-actions">
       <button class="btn btn-danger" id="delFromView" style="margin-right:auto;">Delete</button>
@@ -2942,6 +2955,12 @@ async function refreshLbCache(){
   updateDashRankBanner();
   updateLeaderboardDom();
   checkDailyTopper();
+  const hadActive = lbCache.challenges.some(c=>!c.finished);
+  if(hadActive){
+    await autoSettleChallenges();
+    const { rows: chs2 } = await fetchMyChallenges();
+    if(chs2){ lbCache.challenges = chs2; updateLeaderboardDom(); }
+  }
 }
 function updateLeaderboardDom(){
   // Patches the already-rendered skeleton in place — deliberately does NOT call
@@ -2959,7 +2978,7 @@ function updateLeaderboardDom(){
     const finished = lbCache.challenges.filter(c=>c.finished);
     compListEl.innerHTML = (active.length ? active.map(competitionCardHtml).join('') : `<div class="card empty"><h3>No active challenges</h3><p>Pick a rival and race them for a few days.</p></div>`)
       + (finished.length ? `<details style="margin-top:4px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--text-muted); font-weight:600;">Past Challenges (${finished.length})</summary><div style="display:flex; flex-direction:column; gap:14px; margin-top:12px;">${finished.map(competitionCardHtml).join('')}</div></details>` : '');
-    compListEl.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleCompetitionToday(b.dataset.settleComp)));
+    compListEl.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleOneChallengeCatchUp(lbCache.challenges.find(c=>c.id===b.dataset.settleComp)).then(refreshLbCache)));
   }
   const statusEl = document.getElementById('lbStatus');
   if(statusEl) statusEl.textContent = lbCache.error ? ('Couldn\'t refresh — ' + lbCache.error) : ('Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
@@ -3047,44 +3066,97 @@ function openNewCompetitionModal(){
     }catch(e){ toast('Could not start challenge — ' + (e.message||'network error')); btn.textContent='Start Challenge'; btn.disabled=false; }
   });
 }
-async function settleCompetitionToday(compId){
-  const comp = lbCache.challenges.find(c=>c.id===compId);
-  if(!comp || comp.finished) return;
+/* ============ AUTOMATIC CHALLENGE SETTLEMENT ============
+   No "log result" button — like Duolingo's weekly leagues or a Strava segment board,
+   results settle themselves. There's no server-side cron here (this app has no
+   backend beyond the database), so instead: whenever any participant's app checks
+   in — opening the Dashboard, visiting the Leaderboard, or just sitting on the
+   polling interval — it looks for any challenge days that have fully elapsed but
+   haven't been scored yet, and settles all of them in one pass, catching up on
+   however many days were missed (e.g. nobody opened the app over a weekend). Several
+   people's apps can attempt this around the same moment, so every write is a
+   compare-and-swap: it only applies if last_settled_date still matches what this
+   client last saw. Whoever gets there first wins the write; everyone else's update
+   matches nothing, no-ops safely, and they just pick up the result on their next
+   refresh — same end state either way, no double-counting. */
+async function autoSettleChallenges(){
+  if(!leaderboardSyncReady()) return;
+  const mine = (lbCache.challenges||[]).filter(c=>!c.finished && c.participant_names.includes(state.profile.name));
+  for(const comp of mine){
+    try{ await settleOneChallengeCatchUp(comp); }catch(e){ /* best-effort — next refresh retries */ }
+  }
+}
+async function settleOneChallengeCatchUp(comp){
   const today = todayStr();
-  if(comp.last_settled_date === today){ toast('Already settled for today'); return; }
+  const firstDue = comp.last_settled_date ? addDays(comp.last_settled_date, 1) : comp.start_date;
+  if(firstDue >= today) return; // today is still in progress — nothing due yet
+  const dueDates = [];
+  let d = firstDue;
+  while(d < today && dueDates.length < comp.days){ dueDates.push(d); d = addDays(d, 1); }
+  if(dueDates.length === 0) return;
   const client = getSbClient();
-  try{
-    const { data: minsData, error: minsErr } = await client.from('daily_minutes').select('player_name,minutes').eq('study_date', today).in('player_name', comp.participant_names);
-    if(minsErr){ toast('Could not settle — ' + minsErr.message); return; }
+  const { data: minsData, error } = await client.from('daily_minutes').select('player_name,study_date,minutes').in('study_date', dueDates).in('player_name', comp.participant_names);
+  if(error) return;
+  let points = Object.assign({}, comp.points);
+  let log = (comp.log||[]).slice();
+  let dayIndex = comp.day_index || 0;
+  let finished = false;
+  let lastDate = comp.last_settled_date;
+  for(const date of dueDates){
+    if(dayIndex >= comp.days) break;
     const minutesByName = {}; comp.participant_names.forEach(n=> minutesByName[n]=0);
-    minsData.forEach(r=> minutesByName[r.player_name]=Math.round(r.minutes));
+    minsData.filter(r=>r.study_date===date).forEach(r=> minutesByName[r.player_name] = Math.round(r.minutes));
     const top = Math.max(...comp.participant_names.map(n=>minutesByName[n]));
     const winners = comp.participant_names.filter(n=>minutesByName[n]===top);
-    const isTie = winners.length>1;
-    const points = Object.assign({}, comp.points);
+    const isTie = top===0 || winners.length>1; // an all-zero day (nobody opened the app) counts as a tie, not a random win
     if(!isTie) comp.participant_names.forEach(n=>{ points[n] = (points[n]||0) + (n===winners[0] ? 5 : -5); });
-    const log = (comp.log||[]).concat([{ date:today, standings: comp.participant_names.map(n=>({name:n, minutes:minutesByName[n]})), winner: isTie?null:winners[0] }]);
-    const dayIndex = (comp.day_index||0) + 1;
-    const finished = dayIndex >= comp.days;
-    const { error } = await client.from('challenges').update({ points, log, last_settled_date:today, day_index:dayIndex, finished }).eq('id', comp.id);
-    if(error){ toast('Could not settle — ' + error.message); return; }
-    const resultMsg = isTie ? "Today was a tie — no points awarded" : `${winners[0]} won today (+5)`;
-    toast(resultMsg);
-    pushNotification('challenge', compTitle(comp), resultMsg + (finished ? ' — challenge finished!' : ''));
-    await refreshLbCache(); renderMain();
-  }catch(e){ toast('Could not settle — ' + (e.message||'network error')); }
+    log.push({ date, standings: comp.participant_names.map(n=>({name:n, minutes:minutesByName[n]})), winner: isTie ? null : winners[0] });
+    dayIndex++;
+    lastDate = date;
+    if(dayIndex >= comp.days){ finished = true; break; }
+  }
+  let q = client.from('challenges').update({ points, log, last_settled_date:lastDate, day_index:dayIndex, finished }).eq('id', comp.id);
+  q = comp.last_settled_date ? q.eq('last_settled_date', comp.last_settled_date) : q.is('last_settled_date', null);
+  const { data: updData, error: updErr } = await q.select();
+  if(updErr || !updData || !updData.length) return; // someone else already settled it — we'll see their result on next refresh
+  const priorLogLen = comp.log ? comp.log.length : 0;
+  log.slice(priorLogLen).forEach((entry, i, arr)=>{
+    const mine2 = entry.winner === state.profile.name;
+    const msg = entry.winner ? `${entry.winner} won ${entry.date} (${mine2?'+5':'-5'})` : `${entry.date} was a tie — no points`;
+    pushNotification('challenge', compTitle(comp), msg + (finished && i===arr.length-1 ? ' — challenge finished!' : ''));
+  });
+}
+/* Consecutive most-recent days this browser's user has won, for the small streak
+   badge — inspired by the "current streak" indicators common on habit/fitness apps. */
+function challengeStreakFor(comp){
+  const log = comp.log || [];
+  let streak = 0;
+  for(let i=log.length-1; i>=0; i--){
+    if(log[i].winner === state.profile.name) streak++;
+    else break;
+  }
+  return streak;
 }
 function competitionCardHtml(comp){
   const standings = comp.participant_names.map(n=>({ name:n, points: (comp.points&&comp.points[n])||0 })).sort((a,b)=> b.points-a.points);
-  const settledToday = comp.last_settled_date === todayStr();
   const overallWinner = comp.finished ? standings[0] : null;
+  const streak = challengeStreakFor(comp);
   const avatarFor = (name)=>{ const row = lbCache.rows.find(r=>r.name===name); return personAvatarByName(name, row?row.avatarDataUrl:null, 'avatar-xs'); };
+  const strip = (comp.log||[]).slice(-7).map(entry=>{
+    const won = entry.winner === state.profile.name;
+    const tie = !entry.winner;
+    const cls = tie ? 'comp-day-tie' : (won ? 'comp-day-win' : 'comp-day-loss');
+    const label = tie ? 'Tie' : (won ? 'You won' : `${escapeHtml(entry.winner)} won`);
+    return `<span class="comp-day-dot ${cls}" title="${new Date(entry.date+'T00:00:00').toLocaleDateString([], {month:'short', day:'numeric'})} — ${label}"></span>`;
+  }).join('');
   return `<div class="card comp-card">
     <div class="row" style="justify-content:space-between; margin-bottom:4px;">
       <h3 style="font-size:15px;">${escapeHtml(compTitle(comp))}</h3>
       <span class="badge">${comp.finished? 'Finished' : `Day ${Math.min((comp.day_index||0)+1,comp.days)} / ${comp.days}`}</span>
     </div>
-    <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">+5 for the day's top studier, −5 for the rest.</p>
+    <p style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">+5 for the day's top studier, −5 for the rest. Settles automatically after each day ends.</p>
+    ${strip ? `<div class="comp-day-strip" role="img" aria-label="Recent day-by-day results">${strip}</div>` : ''}
+    ${streak>=2 ? `<p class="comp-streak-note">🔥 ${streak}-day win streak</p>` : ''}
     <div class="comp-standings">
       ${standings.map(s=>`<div class="comp-row ${s.name===state.profile.name?'lb-me':''}">
         ${avatarFor(s.name)}
@@ -3094,9 +3166,7 @@ function competitionCardHtml(comp){
     </div>
     ${comp.finished
       ? `<p class="comp-winner-note">🏆 ${escapeHtml(overallWinner.name)} wins the challenge!</p>`
-      : settledToday
-        ? `<p class="comp-settled-note">✓ Today's result is in — check back tomorrow.</p>`
-        : `<button class="btn btn-sm btn-primary" data-settle-comp="${comp.id}">Log Today's Result</button>`
+      : `<p class="comp-settled-note">Today's studying is being tracked — results post automatically once the day ends.</p>`
     }
   </div>`;
 }
@@ -3147,7 +3217,6 @@ function renderLeaderboard(main){
     </div>
   </div>`;
   document.getElementById('newCompBtn').addEventListener('click', openNewCompetitionModal);
-  document.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleCompetitionToday(b.dataset.settleComp)));
   pushMyPlayerRow(); pushMyDailyMinutes();
   refreshLbCache();
   startLbPoll();
