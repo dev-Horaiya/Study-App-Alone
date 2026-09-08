@@ -3085,8 +3085,16 @@ async function deleteChallenge(compId){
   if(!comp) return;
   confirmAction(`Delete "${compTitle(comp)}"? This can't be undone.`, async ()=>{
     const client = getSbClient();
-    const { error } = await client.from('challenges').delete().eq('id', compId);
+    const { data, error } = await client.from('challenges').delete().eq('id', compId).select();
     if(error){ toast('Could not delete — ' + error.message); return; }
+    if(!data || !data.length){
+      // The request "succeeded" but removed nothing — almost always a missing DELETE
+      // policy in Supabase's Row Level Security, which silently filters rows the anon
+      // role can't touch rather than erroring. Don't pretend it worked: a fake success
+      // here is exactly what let deleted challenges reappear on the next full refresh.
+      toast('Could not delete — no permission to delete on the server (check the Row Level Security DELETE policy on the challenges table).');
+      return;
+    }
     lbCache.challenges = lbCache.challenges.filter(c=>c.id!==compId);
     toast('Challenge deleted');
     updateLeaderboardDom();
