@@ -717,7 +717,15 @@ function resizeImageFileToDataUrl(file, targetPx = AVATAR_TARGET_PX, quality = A
     reader.readAsDataURL(file);
   });
 }
-function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
+function todayStr(d=new Date()){
+  // Local calendar date (device's own timezone), midnight-to-midnight. This also fixes an
+  // earlier issue where UTC was used instead of local time, which could log an evening
+  // session under the wrong calendar day for anyone west of Greenwich.
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 function addDays(dateStr, n){
   const d = new Date(dateStr + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
@@ -1818,12 +1826,32 @@ window.addEventListener('resize', ()=>{
    action) to a separate key, and replays real elapsed wall-clock time back in on load. */
 const LIVE_TIMER_KEY = 'studiumLiveTimerState';
 const LEGACY_LIVE_TIMER_KEYS = ['ledgerLiveTimerState'];
+/* Fixes the "two tabs double-count study time" bug: opening a second tab while a timer
+   runs in another used to make that second tab independently resume and eventually
+   complete/log the SAME timer a second time. sessionStorage is scoped per browser tab
+   and survives a reload of that same tab, but a genuinely different tab gets its own
+   empty sessionStorage — exactly the distinction needed here, which a plain JS variable
+   can't make (it resets on every reload regardless of which tab). Every write to the
+   live timer state is tagged with whichever tab made it; only the tagged "owner" tab
+   drives the countdown/stopwatch and logs sessions. Any other tab just mirrors the
+   displayed value from that owner's writes via the 'storage' event, without running its
+   own interval — so it can't independently reach zero and log a duplicate session. */
+const TAB_ID = (function(){
+  try{
+    let id = sessionStorage.getItem('studiumTabId');
+    if(!id){ id = uid(); sessionStorage.setItem('studiumTabId', id); }
+    return id;
+  }catch(e){ return uid(); }
+})();
+const TIMER_OWNER_STALE_MS = 10000; // if the owning tab hasn't written in this long, treat it as gone (closed/crashed) and take over
+let isMirroringTimer = false;
 function saveLiveTimerState(){
   try{
     localStorage.setItem(LIVE_TIMER_KEY, JSON.stringify({
       pomo: { mode:pomo.mode, remaining:pomo.remaining, running:pomo.running, subjectId:pomo.subjectId, sessionsDone:pomo.sessionsDone },
       sw: { elapsed:sw.elapsed, running:sw.running, subjectId:sw.subjectId },
-      savedAt: Date.now()
+      savedAt: Date.now(),
+      owner: TAB_ID
     }));
   }catch(e){}
 }
@@ -1842,11 +1870,19 @@ function restoreLiveTimerState(){
     data = JSON.parse(raw);
   }catch(e){ return; }
   const now = Date.now();
+  const ownedByOtherFreshTab = data.owner && data.owner !== TAB_ID && (now - (data.savedAt||0)) < TIMER_OWNER_STALE_MS;
   if(data.pomo){
     pomo.mode = data.pomo.mode || 'work';
     pomo.subjectId = data.pomo.subjectId || '';
     pomo.sessionsDone = data.pomo.sessionsDone || 0;
-    if(data.pomo.running){
+    if(data.pomo.running && ownedByOtherFreshTab){
+      // Another tab is actively driving this — just mirror the displayed value, don't
+      // start our own interval or we'd independently complete/log it a second time.
+      const elapsedSec = Math.floor((now - data.savedAt)/1000);
+      pomo.remaining = Math.max(0, data.pomo.remaining - elapsedSec);
+      pomo.running = true;
+      isMirroringTimer = true;
+    } else if(data.pomo.running){
       const elapsedSec = Math.floor((now - data.savedAt)/1000);
       const GRACE_SEC = 120; // generous allowance for a normal refresh/restart gap
       if(elapsedSec > data.pomo.remaining + GRACE_SEC){
@@ -1879,7 +1915,11 @@ function restoreLiveTimerState(){
   }
   if(data.sw){
     sw.subjectId = data.sw.subjectId || '';
-    if(data.sw.running){
+    if(data.sw.running && ownedByOtherFreshTab){
+      sw.elapsed = data.sw.elapsed + (now - data.savedAt);
+      sw.running = true;
+      isMirroringTimer = true;
+    } else if(data.sw.running){
       sw.elapsed = data.sw.elapsed + (now - data.savedAt);
       sw.running = true;
       sw.startedAt = now - sw.elapsed;
@@ -1893,6 +1933,49 @@ function restoreLiveTimerState(){
   updatePomoUI();
   updateSwUI();
 }
+/* Whenever any tab writes a live-timer update, every OTHER tab gets a 'storage' event
+   (the tab that made the write does not). If the write belongs to a different, fresher
+   owner than what we think is running locally, stop our own interval immediately and
+   switch to mirroring — this is what makes ownership hand off cleanly the moment someone
+   starts/stops/finishes a timer in whichever tab they're actually looking at. */
+window.addEventListener('storage', (e)=>{
+  if(e.key !== LIVE_TIMER_KEY || !e.newValue) return;
+  let data;
+  try{ data = JSON.parse(e.newValue); }catch(err){ return; }
+  if(!data.owner || data.owner === TAB_ID) return; // our own write, or nothing to reconcile
+  const now = Date.now();
+  if(data.pomo){
+    if(pomo.running && !data.pomo.running){ stopPomoInterval(); }
+    if(data.pomo.running){
+      const elapsedSec = Math.floor((now - data.savedAt)/1000);
+      pomo.remaining = Math.max(0, data.pomo.remaining - elapsedSec);
+      pomo.running = true;
+      if(pomo.timerId){ stopPomoInterval(); } // relinquish — the other tab now owns it
+      isMirroringTimer = true;
+    } else {
+      stopPomoInterval();
+      pomo.remaining = data.pomo.remaining;
+      pomo.running = false;
+      isMirroringTimer = false;
+    }
+    pomo.mode = data.pomo.mode || pomo.mode;
+  }
+  if(data.sw){
+    if(sw.timerId && !data.sw.running){ clearInterval(sw.timerId); sw.timerId=null; }
+    if(data.sw.running){
+      sw.elapsed = data.sw.elapsed + (now - data.savedAt);
+      sw.running = true;
+      if(sw.timerId){ clearInterval(sw.timerId); sw.timerId=null; } // relinquish
+      isMirroringTimer = true;
+    } else {
+      if(sw.timerId){ clearInterval(sw.timerId); sw.timerId=null; }
+      sw.elapsed = data.sw.elapsed;
+      sw.running = false;
+    }
+  }
+  updatePomoUI(false);
+  updateSwUI(false);
+});
 
 /* ============ FLOATING TIMER (Picture-in-Picture) ============ */
 /* This is the piece that actually survives minimizing the whole browser window — the tab
@@ -2138,10 +2221,10 @@ function completePomoCycle(skipped){
     document.getElementById('pomoDoneCount').textContent = state.sessions.filter(s=>s.date===todayStr() && s.type==='pomodoro').length;
   }
 }
-function updatePomoUI(){
+function updatePomoUI(persist=true){
   updateStickyProgressLive();
   updatePageChrome();
-  saveLiveTimerState();
+  if(persist) saveLiveTimerState();
   if(currentPage!=='pomodoro') return;
   const t = document.getElementById('pomoTime'); if(!t) return;
   const m = Math.floor(pomo.remaining/60).toString().padStart(2,'0');
@@ -2213,10 +2296,10 @@ function toggleSw(){
   }
   updateSwUI();
 }
-function updateSwUI(){
+function updateSwUI(persist=true){
   updateStickyProgressLive();
   updatePageChrome();
-  saveLiveTimerState();
+  if(persist) saveLiveTimerState();
   if(currentPage!=='stopwatch') return;
   const el = document.getElementById('swTime'); if(!el) return;
   const totalSec = Math.floor(sw.elapsed/1000);
@@ -2822,7 +2905,7 @@ function getSbClient(){
    fetches, polling, pushes) is skipped — leaderboardSyncReady() is the single gate every
    one of those call sites already checks before firing, so flipping this one flag is
    enough to fully pause the feature without touching each call site individually. */
-const LEADERBOARD_PAUSED = true;
+const LEADERBOARD_PAUSED = false;
 function leaderboardConfigured(){
   const cfg = state.settings.leaderboardSync;
   return !!(normalizeSupabaseUrl(cfg.supabaseUrl) && cfg.supabaseKey && state.profile.name && getSbClient());
