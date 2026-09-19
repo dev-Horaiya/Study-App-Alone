@@ -1930,27 +1930,18 @@ function restoreLiveTimerState(){
       sw.running = true;
       isMirroringTimer = true;
     } else if(data.sw.running){
-      const gapMs = now - data.savedAt;
-      const STOPWATCH_GRACE_MS = 2*60*1000; // a normal refresh/restart gap
-      if(gapMs > STOPWATCH_GRACE_MS){
-        // Closed for a real while, not just refreshed — don't count that closed time as
-        // studying. Bank only what had genuinely accumulated before it closed, dated to
-        // whichever day that was, then start fresh at zero for right now.
-        const priorMin = data.sw.elapsed/60000;
-        if(priorMin >= 0.05) logSessionOnDate(sw.subjectId, priorMin, 'stopwatch', sw.segmentDate);
-        sw.elapsed = 0;
-        sw.startedAt = now;
-        sw.running = true;
-        sw.segmentDate = todayStr();
-        startSwInterval();
-        ensureKeepAliveAudio();
-      } else {
-        sw.elapsed = data.sw.elapsed + gapMs;
-        sw.running = true;
-        sw.startedAt = now - sw.elapsed;
-        startSwInterval();
-        ensureKeepAliveAudio();
-      }
+      // The stopwatch is open-ended (unlike Pomodoro's bounded sprint length), so a long
+      // gap here does NOT reliably mean "the browser was actually closed" — it's just as
+      // likely to mean the phone screen locked or the tab was backgrounded for a while,
+      // both completely normal during a real study session, and mobile browsers routinely
+      // discard/reload a backgrounded tab's JS in the process. Treating a gap as "closed"
+      // here previously reset people's running stopwatch to zero mid-session, silently.
+      // Always just extend elapsed by the full gap instead.
+      sw.elapsed = data.sw.elapsed + (now - data.savedAt);
+      sw.running = true;
+      sw.startedAt = now - sw.elapsed;
+      startSwInterval();
+      ensureKeepAliveAudio();
     } else {
       sw.elapsed = data.sw.elapsed;
       sw.running = false;
