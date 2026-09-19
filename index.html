@@ -886,13 +886,19 @@ function currentStreak(){
   }
   return streak;
 }
-function logSession(subjectId, minutes, type){
+function logSessionOnDate(subjectId, minutes, type, dateStr){
   if(minutes <= 0) return;
-  state.sessions.push({id:uid(), subjectId: subjectId||null, minutes, date: todayStr(), type, completedAt: new Date().toISOString()});
+  state.sessions.push({id:uid(), subjectId: subjectId||null, minutes, date: dateStr, type, completedAt: new Date().toISOString()});
   if(type==='pomodoro') state.pomodoroCount++;
   save();
   checkAchievements();
-  if(leaderboardSyncReady()) pushMyDailyMinutes();
+  if(leaderboardSyncReady()){
+    if(dateStr === todayStr()) pushMyDailyMinutes().then(refreshLbCache);
+    else pushDailyMinutesForDate(dateStr);
+  }
+}
+function logSession(subjectId, minutes, type){
+  logSessionOnDate(subjectId, minutes, type, todayStr());
 }
 function toast(msg){
   const t = document.getElementById('toast');
@@ -1848,8 +1854,8 @@ let isMirroringTimer = false;
 function saveLiveTimerState(){
   try{
     localStorage.setItem(LIVE_TIMER_KEY, JSON.stringify({
-      pomo: { mode:pomo.mode, remaining:pomo.remaining, running:pomo.running, subjectId:pomo.subjectId, sessionsDone:pomo.sessionsDone },
-      sw: { elapsed:sw.elapsed, running:sw.running, subjectId:sw.subjectId },
+      pomo: { mode:pomo.mode, remaining:pomo.remaining, running:pomo.running, subjectId:pomo.subjectId, sessionsDone:pomo.sessionsDone, segmentDate:pomo.segmentDate },
+      sw: { elapsed:sw.elapsed, running:sw.running, subjectId:sw.subjectId, segmentDate:sw.segmentDate },
       savedAt: Date.now(),
       owner: TAB_ID
     }));
@@ -1875,6 +1881,7 @@ function restoreLiveTimerState(){
     pomo.mode = data.pomo.mode || 'work';
     pomo.subjectId = data.pomo.subjectId || '';
     pomo.sessionsDone = data.pomo.sessionsDone || 0;
+    pomo.segmentDate = data.pomo.segmentDate || todayStr(new Date(data.savedAt||Date.now()));
     if(data.pomo.running && ownedByOtherFreshTab){
       // Another tab is actively driving this — just mirror the displayed value, don't
       // start our own interval or we'd independently complete/log it a second time.
@@ -1889,13 +1896,15 @@ function restoreLiveTimerState(){
         // The gap is far bigger than the timer itself could explain — the browser was
         // actually closed for a while, not just refreshed. Don't fabricate a finished
         // session for time you weren't there for; bank only what was genuinely studied
-        // before it closed, then reset to a fresh, paused state.
+        // before it closed — dated to whichever day it was actually earned on, which
+        // may not be today if the tab closed before midnight and reopened after it.
         if(pomo.mode==='work'){
           const studiedMin = (pomoDuration('work') - data.pomo.remaining) / 60;
-          if(studiedMin >= 1) logSession(pomo.subjectId, studiedMin, 'pomodoro-partial');
+          if(studiedMin >= 1) logSessionOnDate(pomo.subjectId, studiedMin, 'pomodoro-partial', pomo.segmentDate);
         }
         pomo.remaining = pomoDuration(pomo.mode);
         pomo.running = false;
+        pomo.segmentDate = todayStr();
       } else {
         pomo.remaining = data.pomo.remaining - elapsedSec;
         if(pomo.remaining <= 0){
@@ -1915,16 +1924,33 @@ function restoreLiveTimerState(){
   }
   if(data.sw){
     sw.subjectId = data.sw.subjectId || '';
+    sw.segmentDate = data.sw.segmentDate || todayStr(new Date(data.savedAt||Date.now()));
     if(data.sw.running && ownedByOtherFreshTab){
       sw.elapsed = data.sw.elapsed + (now - data.savedAt);
       sw.running = true;
       isMirroringTimer = true;
     } else if(data.sw.running){
-      sw.elapsed = data.sw.elapsed + (now - data.savedAt);
-      sw.running = true;
-      sw.startedAt = now - sw.elapsed;
-      startSwInterval();
-      ensureKeepAliveAudio();
+      const gapMs = now - data.savedAt;
+      const STOPWATCH_GRACE_MS = 2*60*1000; // a normal refresh/restart gap
+      if(gapMs > STOPWATCH_GRACE_MS){
+        // Closed for a real while, not just refreshed — don't count that closed time as
+        // studying. Bank only what had genuinely accumulated before it closed, dated to
+        // whichever day that was, then start fresh at zero for right now.
+        const priorMin = data.sw.elapsed/60000;
+        if(priorMin >= 0.05) logSessionOnDate(sw.subjectId, priorMin, 'stopwatch', sw.segmentDate);
+        sw.elapsed = 0;
+        sw.startedAt = now;
+        sw.running = true;
+        sw.segmentDate = todayStr();
+        startSwInterval();
+        ensureKeepAliveAudio();
+      } else {
+        sw.elapsed = data.sw.elapsed + gapMs;
+        sw.running = true;
+        sw.startedAt = now - sw.elapsed;
+        startSwInterval();
+        ensureKeepAliveAudio();
+      }
     } else {
       sw.elapsed = data.sw.elapsed;
       sw.running = false;
@@ -2082,7 +2108,7 @@ function updatePipButtons(){
 let pomo = {
   mode:'work', // work | break | longBreak
   remaining: state.settings.workMin*60,
-  running:false, timerId:null, subjectId:'', sessionsDone:0, targetEndAt:null
+  running:false, timerId:null, subjectId:'', sessionsDone:0, targetEndAt:null, segmentDate: todayStr()
 };
 function pomoDuration(mode){
   if(mode==='work') return state.settings.workMin*60;
@@ -2144,7 +2170,7 @@ function renderPomodoro(main){
         toast('Logged ' + fmtMin(studiedMin) + ' before resetting');
       }
     }
-    stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; pomo.targetEndAt=null; stopMusic(); updatePomoUI();
+    stopPomoInterval(); pomo.mode='work'; pomo.remaining=pomoDuration('work'); pomo.running=false; pomo.targetEndAt=null; pomo.segmentDate=todayStr(); stopMusic(); updatePomoUI();
   });
   document.getElementById('pomoSkip').addEventListener('click', ()=>completePomoCycle(true));
   const pomoPipBtn = document.getElementById('pomoPipBtn');
@@ -2172,6 +2198,15 @@ function startPomoInterval(){
   stopPomoInterval();
   pomo.targetEndAt = Date.now() + pomo.remaining*1000;
   pomo.timerId = setInterval(()=>{
+    const curDay = todayStr();
+    if(pomo.mode==='work' && curDay !== pomo.segmentDate){
+      const elapsedMin = (pomoDuration('work') - pomo.remaining) / 60;
+      if(elapsedMin >= 1) logSessionOnDate(pomo.subjectId, elapsedMin, 'pomodoro-partial', pomo.segmentDate);
+      pomo.remaining = pomoDuration('work');
+      pomo.segmentDate = curDay;
+      pomo.targetEndAt = Date.now() + pomo.remaining*1000;
+      toast("New day — yesterday's progress was saved, and your sprint restarted fresh.");
+    }
     syncPomoRemaining();
     if(pomo.remaining <= 0){ completePomoCycle(false); return; }
     updatePomoUI();
@@ -2214,6 +2249,7 @@ function completePomoCycle(skipped){
   pomo.remaining = pomoDuration(pomo.mode);
   pomo.running = false;
   pomo.targetEndAt = null;
+  pomo.segmentDate = todayStr();
   pauseMusic();
   stopKeepAliveAudioIfIdle();
   updatePomoUI();
@@ -2241,7 +2277,7 @@ function updatePomoUI(persist=true){
 }
 
 /* ============ STOPWATCH ============ */
-let sw = { running:false, startedAt:0, elapsed:0, timerId:null, subjectId:'' };
+let sw = { running:false, startedAt:0, elapsed:0, timerId:null, subjectId:'', segmentDate: todayStr() };
 function renderStopwatch(main){
   main.innerHTML = `
     <div class="page-header"><div><h1>Stopwatch</h1><p>For open-ended study sessions.</p></div></div>
@@ -2268,7 +2304,7 @@ function renderStopwatch(main){
   document.getElementById('swStop').addEventListener('click', ()=>{
     const mins = sw.elapsed/60000;
     if(mins > 0.05) { logSession(sw.subjectId, mins, 'stopwatch'); sfxStopwatchStop(); toast('Session logged: '+fmtMin(mins)); }
-    clearInterval(sw.timerId); sw.timerId=null; sw.running=false; sw.elapsed=0;
+    clearInterval(sw.timerId); sw.timerId=null; sw.running=false; sw.elapsed=0; sw.segmentDate=todayStr();
     stopMusic();
     stopKeepAliveAudioIfIdle();
     updateSwUI();
@@ -2280,7 +2316,19 @@ function renderStopwatch(main){
 }
 function startSwInterval(){
   clearInterval(sw.timerId);
-  sw.timerId = setInterval(()=>{ sw.elapsed = Date.now()-sw.startedAt; updateSwUI(); },500);
+  sw.timerId = setInterval(()=>{
+    sw.elapsed = Date.now()-sw.startedAt;
+    const curDay = todayStr();
+    if(curDay !== sw.segmentDate){
+      const elapsedMin = sw.elapsed/60000;
+      if(elapsedMin >= 0.05) logSessionOnDate(sw.subjectId, elapsedMin, 'stopwatch', sw.segmentDate);
+      sw.elapsed = 0;
+      sw.startedAt = Date.now();
+      sw.segmentDate = curDay;
+      toast("New day — yesterday's time was saved, and the stopwatch reset to 0.");
+    }
+    updateSwUI();
+  },500);
 }
 function toggleSw(){
   if(!sw.running){
@@ -2973,6 +3021,15 @@ async function pushMyDailyMinutes(){
     }, { onConflict:'player_name,study_date' });
   }catch(e){}
 }
+async function pushDailyMinutesForDate(dateStr){
+  if(!leaderboardSyncReady()) return;
+  const client = getSbClient();
+  try{
+    await client.from('daily_minutes').upsert({
+      player_name: state.profile.name, study_date: dateStr, minutes: Math.round(minutesOnDate(dateStr)), updated_at: new Date().toISOString()
+    }, { onConflict:'player_name,study_date' });
+  }catch(e){}
+}
 /* Avatars are stored as base64 data URLs (up to ~2.7MB each after a 2MB upload) — fine
    for a one-time load, but ruinous if re-downloaded on every roster refresh. The roster
    is re-fetched constantly (every dashboard visit, every leaderboard visit, and every
@@ -3060,7 +3117,7 @@ function updateLeaderboardDom(){
     const active = lbCache.challenges.filter(c=>!c.finished);
     const finished = lbCache.challenges.filter(c=>c.finished);
     compListEl.innerHTML = (active.length ? active.map(competitionCardHtml).join('') : `<div class="card empty"><h3>No active challenges</h3><p>Pick a rival and race them for a few days.</p></div>`)
-      + (finished.length ? `<details style="margin-top:4px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--text-muted); font-weight:600;">Past Challenges (${finished.length})</summary><div style="display:flex; flex-direction:column; gap:14px; margin-top:12px;">${finished.map(competitionCardHtml).join('')}</div></details>` : '');
+      + (finished.length ? `<details open style="margin-top:4px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--text-muted); font-weight:600;">Past Challenges (${finished.length})</summary><div style="display:flex; flex-direction:column; gap:14px; margin-top:12px;">${finished.map(competitionCardHtml).join('')}</div></details>` : '');
     compListEl.querySelectorAll('[data-settle-comp]').forEach(b=> b.addEventListener('click', ()=> settleOneChallengeCatchUp(lbCache.challenges.find(c=>c.id===b.dataset.settleComp)).then(refreshLbCache)));
     compListEl.querySelectorAll('[data-delete-comp]').forEach(b=> b.addEventListener('click', ()=> deleteChallenge(b.dataset.deleteComp)));
   }
