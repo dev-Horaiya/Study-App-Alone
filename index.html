@@ -1813,8 +1813,13 @@ document.addEventListener('visibilitychange', ()=>{
   } else {
     // Coming back into view — resync from real elapsed time immediately rather than
     // waiting for the next (possibly throttled) tick, so nothing looks frozen or stale.
+    // Only do this if THIS tab actually owns/drives the timer — a mirror tab's
+    // sw.startedAt is never set (it only ever displays values relayed from the owner
+    // tab's writes), so recomputing from it here would compute Date.now() - 0, i.e.
+    // the current Unix timestamp itself misread as "elapsed milliseconds" — which is
+    // exactly what produced the ~497,000-hour leaderboard entries.
     syncPomoRemaining();
-    if(sw.running) sw.elapsed = Date.now() - sw.startedAt;
+    if(sw.running && !isMirroringTimer && sw.startedAt) sw.elapsed = Date.now() - sw.startedAt;
     updatePomoUI();
     updateSwUI();
   }
@@ -1988,6 +1993,7 @@ window.addEventListener('storage', (e)=>{
       if(sw.timerId){ clearInterval(sw.timerId); sw.timerId=null; }
       sw.elapsed = data.sw.elapsed;
       sw.running = false;
+      isMirroringTimer = false;
     }
   }
   updatePomoUI(false);
@@ -3003,21 +3009,24 @@ async function pushMyPlayerRow(){
     }, { onConflict:'name' });
   }catch(e){ /* silent — don't interrupt studying over a sync hiccup */ }
 }
+const MAX_SANE_DAILY_MINUTES = 24*60; // nobody studies more than 24h in a day — anything above this is a bug, not a real session
 async function pushMyDailyMinutes(){
   if(!leaderboardSyncReady()) return;
   const client = getSbClient();
+  const minutes = Math.min(MAX_SANE_DAILY_MINUTES, Math.max(0, Math.round(liveTodayMinutes())));
   try{
     await client.from('daily_minutes').upsert({
-      player_name: state.profile.name, study_date: todayStr(), minutes: Math.round(liveTodayMinutes()), updated_at: new Date().toISOString()
+      player_name: state.profile.name, study_date: todayStr(), minutes, updated_at: new Date().toISOString()
     }, { onConflict:'player_name,study_date' });
   }catch(e){}
 }
 async function pushDailyMinutesForDate(dateStr){
   if(!leaderboardSyncReady()) return;
   const client = getSbClient();
+  const minutes = Math.min(MAX_SANE_DAILY_MINUTES, Math.max(0, Math.round(minutesOnDate(dateStr))));
   try{
     await client.from('daily_minutes').upsert({
-      player_name: state.profile.name, study_date: dateStr, minutes: Math.round(minutesOnDate(dateStr)), updated_at: new Date().toISOString()
+      player_name: state.profile.name, study_date: dateStr, minutes, updated_at: new Date().toISOString()
     }, { onConflict:'player_name,study_date' });
   }catch(e){}
 }
