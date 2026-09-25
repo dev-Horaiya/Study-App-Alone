@@ -745,6 +745,7 @@ function defaultState(){
     settings:{ theme:'vintage', workMin:25, breakMin:5, longBreakMin:15, sessionsBeforeLong:4, notifications:false, sfx:true,
       music:{ enabled:false, volume:0.5, fileName:'', source:'file', youtubeUrl:'', youtubeVideoId:'', youtubeTitle:'' },
       leaderboardSync:{ supabaseUrl:DEFAULT_SUPABASE_URL, supabaseKey:DEFAULT_SUPABASE_KEY },
+      leaderboardAccessGranted:false, leaderboardAccessRequestId:null, leaderboardMessengerPopupSeen:false,
       stickyPos:null, lastSeenAnnouncementId:null, lastAnnouncedTopper:null, messengerInviteSeen:false },
     subjects:[],
     sessions:[], // {id, subjectId, minutes, date, type}
@@ -3050,6 +3051,124 @@ async function fetchMissingAvatars(names){
     return true;
   }catch(e){ return false; }
 }
+/* ============ LEADERBOARD ACCESS GATE ============
+   Frontend-only, matching the existing admin system's trust model (no backend, no
+   Edge Function — just this shared Supabase project, same as everything else here).
+   Flow: someone requests access with name+email -> admin sees the request in Settings
+   -> Admin and clicks "Generate Code" -> a fresh random code appears for the admin to
+   copy and send manually (Messenger, email, whatever) -> the person types their email
+   + that code back into the app -> if it matches an issued, not-yet-redeemed request,
+   the leaderboard unlocks on this device.
+   Honest security note: like the existing announcement admin panel, this table's RLS
+   is permissive rather than tied to real server-side identity, because there's no
+   backend here to check against. Someone probing the API directly could theoretically
+   read pending codes. This matches the trust level you already have with the
+   ADMIN_CODE-gated announcement system — not a new weakness, the same one, extended. */
+function generateAccessCode(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I — easy to read aloud
+  const bytes = new Uint8Array(8);
+  (window.crypto || window.msCrypto).getRandomValues(bytes);
+  let code = '';
+  for(let i=0;i<8;i++){ code += chars[bytes[i] % chars.length]; if(i===3) code += '-'; }
+  return code;
+}
+async function submitLeaderboardAccessRequest(name, email){
+  const client = getSbClient();
+  if(!client) return { error:'Not connected to Supabase.' };
+  try{
+    const { data, error } = await client.from('leaderboard_access_requests')
+      .insert({ name, email, status:'pending' })
+      .select().single();
+    if(error) return { error: error.message };
+    state.settings.leaderboardAccessRequestId = data.id;
+    save();
+    return { error:null };
+  }catch(e){ return { error: e.message || 'Network error' }; }
+}
+async function redeemLeaderboardAccessCode(email, code){
+  const client = getSbClient();
+  if(!client) return { error:'Not connected to Supabase.' };
+  try{
+    const { data, error } = await client.from('leaderboard_access_requests')
+      .select('id,status').eq('email', email.trim()).eq('access_code', code.trim().toUpperCase())
+      .eq('status','issued').maybeSingle();
+    if(error) return { error: error.message };
+    if(!data) return { error:'That code doesn\'t match — double-check the email and code, or ask the admin to resend it.' };
+    const { error: updErr } = await client.from('leaderboard_access_requests')
+      .update({ status:'redeemed', redeemed_at:new Date().toISOString() }).eq('id', data.id);
+    if(updErr) return { error: updErr.message };
+    state.settings.leaderboardAccessGranted = true;
+    save();
+    return { error:null };
+  }catch(e){ return { error: e.message || 'Network error' }; }
+}
+async function fetchLeaderboardAccessRequests(){
+  const client = getSbClient();
+  if(!client) return { rows:null, error:'Not connected to Supabase.' };
+  try{
+    const { data, error } = await client.from('leaderboard_access_requests').select('*').order('requested_at', { ascending:false });
+    if(error) return { rows:null, error: error.message };
+    return { rows: data||[], error:null };
+  }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
+}
+async function issueLeaderboardAccessCode(requestId){
+  const client = getSbClient();
+  if(!client) return { error:'Not connected to Supabase.' };
+  const code = generateAccessCode();
+  try{
+    const { error } = await client.from('leaderboard_access_requests')
+      .update({ access_code: code, status:'issued', code_issued_at: new Date().toISOString() }).eq('id', requestId);
+    if(error) return { error: error.message };
+    return { error:null, code };
+  }catch(e){ return { error: e.message || 'Network error' }; }
+}
+function accessRequestRowHtml(r){
+  const statusMap = { pending:'Pending', issued:'Code Sent', redeemed:'✓ Redeemed' };
+  const dt = (iso)=> iso ? new Date(iso).toLocaleString() : '—';
+  return `<div class="card" style="padding:14px; margin-bottom:10px;">
+    <div class="row" style="justify-content:space-between; align-items:flex-start;">
+      <div>
+        <div style="font-weight:700; font-size:14px;">${escapeHtml(r.name)}</div>
+        <div style="font-size:12px; color:var(--text-muted);">${escapeHtml(r.email)}</div>
+      </div>
+      <span class="badge">${statusMap[r.status]||r.status}</span>
+    </div>
+    <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">Requested ${dt(r.requested_at)}</p>
+    ${r.status==='pending' ? `<button class="btn btn-sm btn-primary" data-issue-code="${r.id}" style="margin-top:10px;">Generate Code</button>` : ''}
+    ${r.status==='issued' ? `
+      <div class="row" style="margin-top:10px; gap:8px; align-items:center;">
+        <span class="mono badge" style="font-size:13px;">${escapeHtml(r.access_code)}</span>
+        <button class="btn btn-sm" data-copy-code="${escapeHtml(r.access_code)}">Copy</button>
+        <button class="btn btn-sm" data-issue-code="${r.id}">Regenerate</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">Sent to them yourself yet? Copy this and message it to ${escapeHtml(r.email)}.</p>
+    ` : ''}
+    ${r.status==='redeemed' ? `<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">Redeemed ${dt(r.redeemed_at)}</p>` : ''}
+  </div>`;
+}
+async function loadAndRenderAccessRequests(){
+  const wrap = document.getElementById('lbAccessRequestsWrap');
+  if(!wrap) return;
+  wrap.innerHTML = `<p style="font-size:13px; color:var(--text-muted);">Loading…</p>`;
+  const { rows, error } = await fetchLeaderboardAccessRequests();
+  if(error){ wrap.innerHTML = `<p style="font-size:13px; color:var(--danger);">Could not load requests — ${escapeHtml(error)}. Check that the leaderboard_access_requests table exists (see the SQL file).</p>`; return; }
+  if(!rows.length){ wrap.innerHTML = `<p style="font-size:13px; color:var(--text-muted);">No requests yet.</p>`; return; }
+  wrap.innerHTML = rows.map(accessRequestRowHtml).join('');
+  wrap.querySelectorAll('[data-issue-code]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      btn.disabled = true; btn.textContent = 'Generating…';
+      const { error, code } = await issueLeaderboardAccessCode(btn.dataset.issueCode);
+      if(error){ toast('Could not generate code — ' + error); btn.disabled = false; btn.textContent = 'Generate Code'; return; }
+      toast('Code generated: ' + code);
+      loadAndRenderAccessRequests();
+    });
+  });
+  wrap.querySelectorAll('[data-copy-code]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      navigator.clipboard?.writeText(btn.dataset.copyCode).then(()=> toast('Code copied')).catch(()=> toast('Could not copy — select and copy manually'));
+    });
+  });
+}
 async function fetchRosterRows(){
   const client = getSbClient();
   if(!client) return { rows:null, error:'Leaderboard isn\'t connected.' };
@@ -3341,7 +3460,28 @@ function startLbPoll(){
   stopLbPoll();
   lbPollId = setInterval(()=>{ if(currentPage==='leaderboard') refreshLbCache(); else stopLbPoll(); }, LB_POLL_INTERVAL_MS);
 }
+function maybeShowLeaderboardMessengerPopup(){
+  if(state.settings.leaderboardMessengerPopupSeen || state.settings.leaderboardAccessGranted) return;
+  state.settings.leaderboardMessengerPopupSeen = true;
+  save();
+  openModal(`
+    <div style="text-align:center; padding:6px 4px 2px;">
+      <div style="width:72px; height:72px; margin:0 auto 18px; border-radius:50%; background:linear-gradient(135deg, #00B2FF 0%, #7A5AF8 55%, #FF6BC1 100%); display:flex; align-items:center; justify-content:center; box-shadow:0 8px 24px rgba(122,90,248,.45);">
+        <svg viewBox="0 0 24 24" fill="#fff" width="34" height="34" xmlns="http://www.w3.org/2000/svg"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+      </div>
+      <h2 style="font-size:21px; margin-bottom:10px;">Join the Discussion Group</h2>
+      <p style="font-size:14.5px; color:var(--text-muted); line-height:1.6; margin-bottom:22px;">This is the Studium Messenger group — where study tips, feature updates, and community chat happen.<br><br><strong style="color:var(--text);">If you want an access code for the leaderboard, this is where you need to join.</strong> Once you're in, ask there and it'll come your way.</p>
+      <div class="modal-actions" style="justify-content:center;">
+        <button class="btn" id="lbMessengerLaterBtn">Maybe later</button>
+        <a class="btn btn-primary" id="lbMessengerJoinBtn" href="${MESSENGER_INVITE_LINK}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; text-align:center;">Join Messenger Group</a>
+      </div>
+    </div>
+  `);
+  document.getElementById('lbMessengerLaterBtn').addEventListener('click', closeModal);
+  document.getElementById('lbMessengerJoinBtn').addEventListener('click', closeModal);
+}
 function renderLeaderboard(main){
+  maybeShowLeaderboardMessengerPopup();
   if(LEADERBOARD_PAUSED){
     main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Compete on daily study hours with friends.</p></div></div>
     <div class="card" style="max-width:480px;">
@@ -3356,6 +3496,53 @@ function renderLeaderboard(main){
       <h3 style="font-size:16px; margin-bottom:10px;">Not connected</h3>
       <p style="font-size:13px; color:var(--text-muted);">The leaderboard needs a Project URL and anon key set in Settings to work. Check the Leaderboard Sync section there.</p>
     </div>`;
+    return;
+  }
+  if(!state.settings.leaderboardAccessGranted){
+    main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Compete on daily study hours with friends.</p></div></div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:8px;">🔒 Request Access</h3>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">The leaderboard is invite-only. Send your name and email, and the admin will send you a one-time code to unlock it.</p>
+        <div class="field" style="margin-bottom:10px;"><label>Name</label><input type="text" id="lbReqName" placeholder="Your name"></div>
+        <div class="field" style="margin-bottom:10px;"><label>Email</label><input type="email" id="lbReqEmail" placeholder="you@example.com"></div>
+        <button class="btn btn-primary" id="lbReqSubmitBtn">Request Access</button>
+        <p style="font-size:12px; margin-top:10px;" id="lbReqStatus"></p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:15px; margin-bottom:8px;">Have a code?</h3>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Enter the email you requested with and the code the admin sent you.</p>
+        <div class="field" style="margin-bottom:10px;"><label>Email</label><input type="email" id="lbCodeEmail" placeholder="you@example.com"></div>
+        <div class="field" style="margin-bottom:10px;"><label>Code</label><input type="text" id="lbCodeInput" placeholder="XXXX-XXXX" style="text-transform:uppercase;"></div>
+        <button class="btn btn-primary" id="lbCodeSubmitBtn">Unlock Leaderboard</button>
+        <p style="font-size:12px; margin-top:10px;" id="lbCodeStatus"></p>
+      </div>
+    </div>`;
+    const reqBtn = document.getElementById('lbReqSubmitBtn');
+    reqBtn.addEventListener('click', async ()=>{
+      const name = document.getElementById('lbReqName').value.trim();
+      const email = document.getElementById('lbReqEmail').value.trim();
+      const statusEl = document.getElementById('lbReqStatus');
+      if(!name){ statusEl.textContent = 'Enter your name.'; statusEl.style.color = 'var(--danger)'; return; }
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ statusEl.textContent = 'Enter a valid email.'; statusEl.style.color = 'var(--danger)'; return; }
+      reqBtn.disabled = true; reqBtn.textContent = 'Sending…';
+      const { error } = await submitLeaderboardAccessRequest(name, email);
+      reqBtn.disabled = false; reqBtn.textContent = 'Request Access';
+      if(error){ statusEl.textContent = error; statusEl.style.color = 'var(--danger)'; return; }
+      statusEl.textContent = 'Request sent — you\'ll get a code from the admin soon.'; statusEl.style.color = 'var(--text-muted)';
+    });
+    const codeBtn = document.getElementById('lbCodeSubmitBtn');
+    codeBtn.addEventListener('click', async ()=>{
+      const email = document.getElementById('lbCodeEmail').value.trim();
+      const code = document.getElementById('lbCodeInput').value.trim();
+      const statusEl = document.getElementById('lbCodeStatus');
+      if(!email || !code){ statusEl.textContent = 'Enter both your email and code.'; statusEl.style.color = 'var(--danger)'; return; }
+      codeBtn.disabled = true; codeBtn.textContent = 'Checking…';
+      const { error } = await redeemLeaderboardAccessCode(email, code);
+      codeBtn.disabled = false; codeBtn.textContent = 'Unlock Leaderboard';
+      if(error){ statusEl.textContent = error; statusEl.style.color = 'var(--danger)'; return; }
+      toast('Leaderboard unlocked!'); renderMain();
+    });
     return;
   }
   main.innerHTML = `<div class="page-header"><div><h1>Leaderboard</h1><p>Today's study time, ranked. Highest wins the day. Refreshes every 2 minutes while you're on this page.</p></div></div>
@@ -3759,6 +3946,13 @@ function renderSettings(main){
         </div>
       `}
     </div>
+    ${isAdminUnlocked ? `<div class="card">
+      <div class="row" style="justify-content:space-between; margin-bottom:12px;">
+        <h3 style="font-size:15px;">Leaderboard Access Requests</h3>
+        <button class="btn btn-sm" id="lbAccessRefreshBtn">Refresh</button>
+      </div>
+      <div id="lbAccessRequestsWrap"><p style="font-size:13px; color:var(--text-muted);">Loading…</p></div>
+    </div>` : ''}
     <div class="card">
       <h3 style="font-size:15px; margin-bottom:14px;">Your Data</h3>
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Everything you track — sessions, notes, subjects — is stored only in this browser. The one exception is the Leaderboard above, if connected.</p>
@@ -3792,6 +3986,11 @@ function renderSettings(main){
     if(code === ADMIN_CODE){ isAdminUnlocked = true; renderMain(); toast('Admin unlocked'); }
     else toast('Incorrect code');
   });
+  const lbAccessRefreshBtn = document.getElementById('lbAccessRefreshBtn');
+  if(lbAccessRefreshBtn){
+    lbAccessRefreshBtn.addEventListener('click', loadAndRenderAccessRequests);
+    loadAndRenderAccessRequests();
+  }
   const announceSendBtn = document.getElementById('announceSendBtn');
   if(announceSendBtn) announceSendBtn.addEventListener('click', async ()=>{
     const msg = document.getElementById('announceText').value.trim();
