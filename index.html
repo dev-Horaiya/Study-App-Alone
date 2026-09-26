@@ -3001,7 +3001,7 @@ async function postAnnouncement(message){
 }
 
 async function pushMyPlayerRow(){
-  if(!leaderboardSyncReady()) return;
+  if(!leaderboardSyncReady() || !state.settings.leaderboardAccessGranted) return;
   const client = getSbClient();
   avatarCache[state.profile.name] = state.profile.avatarDataUrl || null;
   try{
@@ -3012,7 +3012,7 @@ async function pushMyPlayerRow(){
 }
 const MAX_SANE_DAILY_MINUTES = 24*60; // nobody studies more than 24h in a day — anything above this is a bug, not a real session
 async function pushMyDailyMinutes(){
-  if(!leaderboardSyncReady()) return;
+  if(!leaderboardSyncReady() || !state.settings.leaderboardAccessGranted) return;
   const client = getSbClient();
   const minutes = Math.min(MAX_SANE_DAILY_MINUTES, Math.max(0, Math.round(liveTodayMinutes())));
   try{
@@ -3022,7 +3022,7 @@ async function pushMyDailyMinutes(){
   }catch(e){}
 }
 async function pushDailyMinutesForDate(dateStr){
-  if(!leaderboardSyncReady()) return;
+  if(!leaderboardSyncReady() || !state.settings.leaderboardAccessGranted) return;
   const client = getSbClient();
   const minutes = Math.min(MAX_SANE_DAILY_MINUTES, Math.max(0, Math.round(minutesOnDate(dateStr))));
   try{
@@ -3076,6 +3076,16 @@ async function submitLeaderboardAccessRequest(name, email){
   const client = getSbClient();
   if(!client) return { error:'Not connected to Supabase.' };
   try{
+    // One request per email — if they've already got a pending or already-issued
+    // request, don't create a duplicate; just point them at what already exists.
+    const { data: existing, error: lookupErr } = await client.from('leaderboard_access_requests')
+      .select('id,status').eq('email', email).in('status', ['pending','issued']).maybeSingle();
+    if(lookupErr) return { error: lookupErr.message };
+    if(existing){
+      state.settings.leaderboardAccessRequestId = existing.id;
+      save();
+      return { error:null, alreadyRequested:true, status:existing.status };
+    }
     const { data, error } = await client.from('leaderboard_access_requests')
       .insert({ name, email, status:'pending' })
       .select().single();
@@ -3108,7 +3118,8 @@ async function fetchLeaderboardAccessRequests(){
   try{
     const { data, error } = await client.from('leaderboard_access_requests').select('*').order('requested_at', { ascending:false });
     if(error) return { rows:null, error: error.message };
-    return { rows: data||[], error:null };
+    const rows = (data||[]).filter(r => r.email && r.email.trim());
+    return { rows, error:null };
   }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
 }
 async function issueLeaderboardAccessCode(requestId){
@@ -3168,6 +3179,31 @@ async function loadAndRenderAccessRequests(){
       navigator.clipboard?.writeText(btn.dataset.copyCode).then(()=> toast('Code copied')).catch(()=> toast('Could not copy — select and copy manually'));
     });
   });
+}
+/* Instant admin notification for new access requests, via Supabase Realtime — still
+   "frontend only" (uses the normal anon key, no Edge Function), but requires Realtime
+   to be switched on for this table in the Supabase dashboard first: Database → 
+   Replication → find "leaderboard_access_requests" → enable it. Without that one-time
+   toggle, new requests still show up fine when you open the Admin panel and click
+   Refresh — you just won't get the instant notification while looking elsewhere. */
+let adminRequestChannel = null;
+function startAdminRequestNotifications(){
+  const client = getSbClient();
+  if(!client || adminRequestChannel) return; // already subscribed this session
+  fetchLeaderboardAccessRequests().then(({rows})=>{
+    const pending = (rows||[]).filter(r=>r.status==='pending').length;
+    if(pending>0) toast(`${pending} pending leaderboard request${pending===1?'':'s'} waiting`);
+  });
+  try{
+    adminRequestChannel = client.channel('admin-access-requests')
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'leaderboard_access_requests' }, (payload)=>{
+        const r = payload.new;
+        toast(`New leaderboard request from ${r.name}`);
+        pushNotification('leaderboard-request', 'New Access Request', `${r.name} (${r.email}) requested leaderboard access.`);
+        if(currentPage==='settings') loadAndRenderAccessRequests();
+      })
+      .subscribe();
+  }catch(e){ /* Realtime not available/enabled — silent fallback to manual Refresh */ }
 }
 async function fetchRosterRows(){
   const client = getSbClient();
@@ -3526,9 +3562,16 @@ function renderLeaderboard(main){
       if(!name){ statusEl.textContent = 'Enter your name.'; statusEl.style.color = 'var(--danger)'; return; }
       if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ statusEl.textContent = 'Enter a valid email.'; statusEl.style.color = 'var(--danger)'; return; }
       reqBtn.disabled = true; reqBtn.textContent = 'Sending…';
-      const { error } = await submitLeaderboardAccessRequest(name, email);
+      const { error, alreadyRequested, status } = await submitLeaderboardAccessRequest(name, email);
       reqBtn.disabled = false; reqBtn.textContent = 'Request Access';
       if(error){ statusEl.textContent = error; statusEl.style.color = 'var(--danger)'; return; }
+      if(alreadyRequested){
+        statusEl.textContent = status==='issued'
+          ? 'You already have a code waiting — check with the admin if you haven\'t received it.'
+          : 'You\'ve already requested access — no need to send another, the admin will get to it.';
+        statusEl.style.color = 'var(--text-muted)';
+        return;
+      }
       statusEl.textContent = 'Request sent — you\'ll get a code from the admin soon.'; statusEl.style.color = 'var(--text-muted)';
     });
     const codeBtn = document.getElementById('lbCodeSubmitBtn');
@@ -3983,7 +4026,7 @@ function renderSettings(main){
   const adminUnlockBtn = document.getElementById('adminUnlockBtn');
   if(adminUnlockBtn) adminUnlockBtn.addEventListener('click', ()=>{
     const code = document.getElementById('adminCodeInput').value;
-    if(code === ADMIN_CODE){ isAdminUnlocked = true; renderMain(); toast('Admin unlocked'); }
+    if(code === ADMIN_CODE){ isAdminUnlocked = true; renderMain(); toast('Admin unlocked'); startAdminRequestNotifications(); }
     else toast('Incorrect code');
   });
   const lbAccessRefreshBtn = document.getElementById('lbAccessRefreshBtn');
