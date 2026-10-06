@@ -3075,7 +3075,7 @@ function leaderboardConfigured(){
 function leaderboardSyncReady(){
   return !LEADERBOARD_PAUSED && leaderboardConfigured();
 }
-let lbCache = { rows:[], restricted:[], challenges:[], loaded:false, error:null };
+let lbCache = { rows:[], challenges:[], loaded:false, error:null };
 
 /* ============ ADMIN ANNOUNCEMENTS ============ */
 /* One-way broadcast: only whoever has the admin code can post, everyone else just
@@ -3254,44 +3254,29 @@ async function issueLeaderboardAccessCode(requestId){
     return { error:null, code };
   }catch(e){ return { error: e.message || 'Network error' }; }
 }
-async function adminUpdatePlayerInfo(reqId, oldName, oldEmail, newName, newEmail){
+async function adminRenamePlayer(requestId, email, newName){
   const client = getSbClient();
   if(!client) return { error:'Not connected.' };
   try{
-    if(newName!==oldName){
-      const { data: c } = await client.from('players').select('name').eq('name', newName).maybeSingle();
-      if(c) return { error:'That name is already taken.' };
-    }
-    if(newEmail!==oldEmail){
-      const { data: c } = await client.from('leaderboard_access_requests').select('id').eq('email', newEmail).neq('id', reqId).maybeSingle();
-      if(c) return { error:'That email already has a request.' };
-    }
-    const { error: e1 } = await client.from('leaderboard_access_requests').update({ name:newName, email:newEmail }).eq('id', reqId);
+    const { error: e1 } = await client.from('leaderboard_access_requests').update({ name:newName }).eq('id', requestId);
     if(e1) return { error:e1.message };
-    const { error: e2 } = await client.from('players').update({ name:newName, email:newEmail }).eq('email', oldEmail);
-    if(e2) return { error:e2.message };
-    if(newName!==oldName){
-      const { error: e3 } = await client.from('daily_minutes').update({ player_name:newName }).eq('player_name', oldName);
-      if(e3) return { error:'Saved, but past daily totals did not follow — ' + e3.message };
-      avatarCache[newName] = avatarCache[oldName] || null; delete avatarCache[oldName];
+    if(email){
+      const { data: playerRow } = await client.from('players').select('name').eq('email', email).maybeSingle();
+      if(playerRow && playerRow.name && playerRow.name !== newName){
+        const oldName = playerRow.name;
+        const { error: e2 } = await client.from('players').update({ name:newName }).eq('email', email);
+        if(e2) return { error:e2.message };
+        const { error: e3 } = await client.from('daily_minutes').update({ player_name:newName }).eq('player_name', oldName);
+        if(e3) return { error: 'Renamed, but their past daily totals couldn\'t follow — ' + e3.message };
+      }
     }
     return { error:null };
   }catch(e){ return { error: e.message||'Network error' }; }
 }
-async function adminRemovePlayerPhoto(email, name){
+async function adminSuspendPlayer(requestId, days){
   const client = getSbClient();
   if(!client) return { error:'Not connected.' };
-  try{
-    const { error } = await client.from('players').update({ avatar_data_url:null }).eq('email', email);
-    if(error) return { error:error.message };
-    avatarCache[name] = null;
-    return { error:null };
-  }catch(e){ return { error: e.message||'Network error' }; }
-}
-async function adminSuspendPlayer(requestId, hours){
-  const client = getSbClient();
-  if(!client) return { error:'Not connected.' };
-  const until = new Date(Date.now() + hours*60*60*1000).toISOString();
+  const until = new Date(Date.now() + days*24*60*60*1000).toISOString();
   try{
     const { error } = await client.from('leaderboard_access_requests').update({ suspended_until: until, blocked_at:null }).eq('id', requestId);
     if(error) return { error: error.message };
@@ -3356,7 +3341,13 @@ function accessRequestRowHtml(r){
     ` : ''}
     ${r.status==='redeemed' ? `
       <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">Redeemed ${dt(r.redeemed_at)}${isSuspended ? ` · Suspended until ${dt(r.suspended_until)}` : ''}${isBlocked ? ` · Blocked ${dt(r.blocked_at)}` : ''}</p>
-      <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">To edit, suspend, block or delete: open the Leaderboard and tap their profile picture.</p>
+      <div class="row" style="margin-top:10px; gap:6px; flex-wrap:wrap;">
+        <button class="btn btn-sm" data-rename="${r.id}" data-email="${escapeHtml(r.email)}" data-current-name="${escapeHtml(r.name)}">Rename</button>
+        ${!isBlocked && !isSuspended ? `<button class="btn btn-sm" data-suspend="${r.id}">Suspend</button>` : ''}
+        ${!isBlocked ? `<button class="btn btn-sm" data-block="${r.id}" style="color:var(--danger);">Block Permanently</button>` : ''}
+        ${(isBlocked || isSuspended) ? `<button class="btn btn-sm" data-restore="${r.id}">Unban</button>` : ''}
+        <button class="btn btn-sm" data-delete-player="${r.id}" data-email="${escapeHtml(r.email)}" data-current-name="${escapeHtml(r.name)}" style="color:var(--danger);">Delete Permanently</button>
+      </div>
     ` : ''}
   </div>`;
 }
@@ -3380,6 +3371,56 @@ async function loadAndRenderAccessRequests(){
   wrap.querySelectorAll('[data-copy-code]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       navigator.clipboard?.writeText(btn.dataset.copyCode).then(()=> toast('Code copied')).catch(()=> toast('Could not copy — select and copy manually'));
+    });
+  });
+  wrap.querySelectorAll('[data-rename]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const newName = prompt('New display name:', btn.dataset.currentName);
+      if(!newName || !newName.trim() || newName.trim()===btn.dataset.currentName) return;
+      btn.disabled = true;
+      const { error } = await adminRenamePlayer(btn.dataset.rename, btn.dataset.email, newName.trim());
+      btn.disabled = false;
+      if(error){ toast('Could not rename — ' + error); return; }
+      toast('Renamed'); loadAndRenderAccessRequests(); refreshLbCache();
+    });
+  });
+  wrap.querySelectorAll('[data-suspend]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const daysStr = prompt('Suspend for how many days?', '7');
+      const days = parseInt(daysStr, 10);
+      if(!days || days<=0) return;
+      btn.disabled = true;
+      const { error } = await adminSuspendPlayer(btn.dataset.suspend, days);
+      btn.disabled = false;
+      if(error){ toast('Could not suspend — ' + error); return; }
+      toast(`Suspended for ${days} day${days===1?'':'s'}`); loadAndRenderAccessRequests(); refreshLbCache();
+    });
+  });
+  wrap.querySelectorAll('[data-block]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      confirmAction('Block this person permanently from the leaderboard? They can only come back if you unban them.', async ()=>{
+        const { error } = await adminBlockPlayer(btn.dataset.block);
+        if(error){ toast('Could not block — ' + error); return; }
+        toast('Blocked'); loadAndRenderAccessRequests(); refreshLbCache();
+      });
+    });
+  });
+  wrap.querySelectorAll('[data-restore]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      btn.disabled = true;
+      const { error } = await adminRestorePlayer(btn.dataset.restore);
+      btn.disabled = false;
+      if(error){ toast('Could not unban — ' + error); return; }
+      toast('Unbanned'); loadAndRenderAccessRequests(); refreshLbCache();
+    });
+  });
+  wrap.querySelectorAll('[data-delete-player]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      confirmAction(`Permanently delete ${btn.dataset.currentName}? This removes their request, leaderboard entry, and all daily study records. This can't be undone.`, async ()=>{
+        const { error } = await adminDeletePlayerCompletely(btn.dataset.deletePlayer, btn.dataset.email, btn.dataset.currentName);
+        if(error){ toast('Could not delete — ' + error); return; }
+        toast('Deleted permanently'); loadAndRenderAccessRequests(); refreshLbCache();
+      });
     });
   });
 }
@@ -3422,16 +3463,6 @@ async function fetchVerifiedEmails(){
     return new Set(verified.map(r=>r.email));
   }catch(e){ return new Set(); }
 }
-async function fetchAdminRequestMap(){
-  const client = getSbClient();
-  const map = new Map();
-  if(!client) return map;
-  try{
-    const { data } = await client.from('leaderboard_access_requests').select('id,email,blocked_at,suspended_until').eq('status','redeemed');
-    (data||[]).forEach(r=> map.set(r.email, r));
-  }catch(e){}
-  return map;
-}
 async function fetchRosterRows(){
   const client = getSbClient();
   if(!client) return { rows:null, error:'Leaderboard isn\'t connected.' };
@@ -3446,13 +3477,6 @@ async function fetchRosterRows(){
     if(minutesRes.error) return { rows:null, error:minutesRes.error.message };
     const minutesByName = {};
     minutesRes.data.forEach(r=> minutesByName[r.player_name] = r.minutes);
-    const adminMap = isAdminUnlocked ? await fetchAdminRequestMap() : null;
-    const reqOf = (p)=> (adminMap && adminMap.get(p.email)) || null;
-    const restricted = adminMap ? playersRes.data.filter(p=> p.email && adminMap.has(p.email) && !verifiedEmails.has(p.email)).map(p=>{
-      const q = adminMap.get(p.email);
-      return { name:p.name, email:p.email, reqId:q.id, restricted:true, blocked:!!q.blocked_at, suspendedUntil:q.suspended_until,
-        avatarDataUrl: avatarCache[p.name] || null, minutes: Math.round(minutesByName[p.name]||0), isMe: p.name === state.profile.name };
-    }) : [];
     // Only verified members (redeemed, not blocked, not currently suspended) show on the
     // leaderboard — anyone whose email isn't in that set is excluded, including players
     // from before this check existed (no email on file at all can't be confirmed verified).
@@ -3460,16 +3484,16 @@ async function fetchRosterRows(){
       .filter(p=> p.email && verifiedEmails.has(p.email))
       .map(p=>({
         name:p.name, avatarDataUrl: avatarCache[p.name] || null, minutes: Math.round(minutesByName[p.name]||0),
-        isMe: p.name === state.profile.name, email:p.email, reqId: reqOf(p) ? reqOf(p).id : null
+        isMe: p.name === state.profile.name
       }));
     rows.sort((a,b)=> b.minutes - a.minutes);
     // Fire-and-forget: only pulls photos for names we've never seen this session (usually
     // zero after the first load), then patches them into the already-rendered leaderboard.
-    fetchMissingAvatars(rows.concat(restricted).map(r=>r.name)).then(gotNew=>{ if(gotNew){
-      rows.concat(restricted).forEach(r=>{ if(r.name in avatarCache) r.avatarDataUrl = avatarCache[r.name]; });
+    fetchMissingAvatars(rows.map(r=>r.name)).then(gotNew=>{ if(gotNew){
+      rows.forEach(r=>{ if(r.name in avatarCache) r.avatarDataUrl = avatarCache[r.name]; });
       lbCache.rows = rows; updateLeaderboardDom(); updateDashRankBanner();
     }});
-    return { rows, restricted, error:null };
+    return { rows, error:null };
   }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
 }
 async function fetchMyChallenges(){
@@ -3482,8 +3506,8 @@ async function fetchMyChallenges(){
   }catch(e){ return { rows:null, error: e.message || 'Network error' }; }
 }
 async function refreshLbCache(){
-  const { rows, restricted, error } = await fetchRosterRows();
-  if(rows){ lbCache.rows = rows; lbCache.restricted = restricted||[]; } else lbCache.error = error;
+  const { rows, error } = await fetchRosterRows();
+  if(rows) lbCache.rows = rows; else lbCache.error = error;
   const { rows: chs } = await fetchMyChallenges();
   if(chs) lbCache.challenges = chs;
   lbCache.loaded = true;
@@ -3503,7 +3527,9 @@ function updateLeaderboardDom(){
   // would never stop.
   const listEl = document.getElementById('lbList');
   if(listEl){
-    listEl.innerHTML = lbListHtml();
+    listEl.innerHTML = lbCache.loaded
+      ? (lbCache.rows.length ? lbCache.rows.map(leaderboardRowHtml).join('') : '<p class="sticky-empty">No one\'s studied yet today.</p>')
+      : '<p class="sticky-empty" style="opacity:.7;">Loading…</p>';
   }
   const compListEl = document.getElementById('compList');
   if(compListEl){
@@ -3588,96 +3614,14 @@ async function openPlayerWeeklyModal(name){
     ${total>0 ? `<p style="font-size:12px; color:var(--text-muted); margin-top:8px;">Best day: <strong style="color:var(--text);">${escapeHtml(best.label)}</strong> · ${fmtMin(best.mins)}</p>` : ''}
     <p style="font-size:11px; color:var(--text-muted); margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">Only daily totals are shared to the leaderboard — subjects and session details stay on each person's own device.</p>`;
 }
-function lbListHtml(){
-  if(!lbCache.loaded) return '<p class="sticky-empty" style="opacity:.7;">Loading…</p>';
-  let h = lbCache.rows.length ? lbCache.rows.map(leaderboardRowHtml).join('') : '<p class="sticky-empty">No one\'s studied yet today.</p>';
-  if(isAdminUnlocked){
-    const rs = lbCache.restricted || [];
-    h = '<p style="font-size:11.5px; color:var(--accent); margin-bottom:8px;">🛡 Admin mode — tap a profile picture to edit, suspend, block or delete that person.</p>' + h
-      + (rs.length ? '<div style="font-size:11px; font-weight:600; color:var(--text-muted); margin:16px 0 4px; text-transform:uppercase; letter-spacing:.05em;">Suspended / blocked (only you see this)</div>' + rs.map(r=>leaderboardRowHtml(r,-1)).join('') : '');
-  }
-  return h;
-}
 function leaderboardRowHtml(r, i){
   const medals = ['🥇','🥈','🥉'];
-  const av = personAvatarByName(r.name, r.avatarDataUrl, 'avatar-sm');
-  const avatar = isAdminUnlocked && r.reqId ? `<span data-admin-player="${escapeHtml(r.name)}" title="Manage ${escapeHtml(r.name)}" style="cursor:pointer; border-radius:50%; box-shadow:0 0 0 2px var(--accent); display:inline-flex;">${av}</span>` : av;
-  const right = r.restricted ? `<span class="badge" style="color:var(--danger);">${r.blocked ? '⛔ Blocked' : '⏸ Suspended'}</span>` : `<span class="lb-mins mono">${fmtMin(r.minutes)}</span>`;
-  return `<div class="lb-row ${r.isMe?'lb-me':''}" data-view-player="${escapeHtml(r.name)}" style="cursor:pointer;${r.restricted?' opacity:.65;':''}">
-    <span class="lb-rank">${r.restricted ? '—' : (medals[i] || (i+1))}</span>
-    ${avatar}
+  return `<div class="lb-row ${r.isMe?'lb-me':''}" data-view-player="${escapeHtml(r.name)}" style="cursor:pointer;">
+    <span class="lb-rank">${medals[i] || (i+1)}</span>
+    ${personAvatarByName(r.name, r.avatarDataUrl, 'avatar-sm')}
     <span class="lb-name">${escapeHtml(r.name)}${r.isMe?' <span class="lb-you">(you)</span>':''}</span>
-    ${right}
+    <span class="lb-mins mono">${fmtMin(r.minutes)}</span>
   </div>`;
-}
-function openAdminPlayerModal(name){
-  const r = [...(lbCache.rows||[]), ...(lbCache.restricted||[])].find(x=>x.name===name);
-  if(!r || !r.reqId){ toast('No admin record for this person.'); return; }
-  const suspended = r.restricted && !r.blocked;
-  const status = r.blocked ? '⛔ Blocked permanently' : suspended ? '⏸ Suspended until ' + new Date(r.suspendedUntil).toLocaleString() : '✓ Active';
-  openModal(`<div class="row" style="gap:12px; margin-bottom:14px;">
-      ${personAvatarByName(r.name, r.avatarDataUrl, 'avatar')}
-      <div><div style="font-weight:700; font-size:16px;">Manage ${escapeHtml(r.name)}</div><div style="font-size:12px; color:var(--text-muted);">${status}</div></div>
-    </div>
-    <div class="field"><label>Display name</label><input type="text" id="apName" value="${escapeHtml(r.name)}"></div>
-    <div class="field"><label>Email</label><input type="text" id="apEmail" value="${escapeHtml(r.email||'')}"></div>
-    <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:16px;">
-      <button class="btn btn-primary btn-sm" id="apSave">Save changes</button>
-      ${r.avatarDataUrl ? '<button class="btn btn-sm" id="apPhoto">Remove photo</button>' : ''}
-    </div>
-    <div class="field" style="border-top:1px solid var(--border); padding-top:14px;"><label>Suspend for</label>
-      <div class="row" style="gap:8px;">
-        <select id="apDur"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24">1 day</option><option value="72">3 days</option><option value="168" selected>7 days</option><option value="336">14 days</option><option value="720">30 days</option><option value="custom">Custom (days)…</option></select>
-        <input type="number" id="apCustom" min="1" placeholder="Days" style="display:none; width:90px;">
-        <button class="btn btn-sm" id="apSuspend">Suspend</button>
-      </div></div>
-    <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:6px;">
-      ${(r.blocked||suspended) ? '<button class="btn btn-sm" id="apRestore">Unban / restore</button>' : ''}
-      ${!r.blocked ? '<button class="btn btn-sm btn-danger" id="apBlock">Block permanently</button>' : ''}
-      <button class="btn btn-sm btn-danger" id="apDelete">Delete permanently</button>
-    </div>
-    <div class="modal-actions"><button class="btn" id="apClose">Close</button></div>`);
-  const $ = id=>document.getElementById(id);
-  const done = (msg)=>{ toast(msg); closeModal(); refreshLbCache(); loadAndRenderAccessRequests(); };
-  $('apClose').addEventListener('click', closeModal);
-  $('apDur').addEventListener('change', ()=>{ $('apCustom').style.display = $('apDur').value==='custom' ? '' : 'none'; });
-  $('apSave').addEventListener('click', async ()=>{
-    const n = $('apName').value.trim(), e = $('apEmail').value.trim().toLowerCase();
-    if(!n || !e.includes('@')){ toast('Enter a name and a valid email'); return; }
-    if(n===r.name && e===(r.email||'').toLowerCase()){ toast('Nothing changed'); return; }
-    $('apSave').disabled = true;
-    const { error } = await adminUpdatePlayerInfo(r.reqId, r.name, r.email, n, e);
-    $('apSave').disabled = false;
-    if(error){ toast('Could not save — ' + error); return; }
-    done('Saved');
-  });
-  if($('apPhoto')) $('apPhoto').addEventListener('click', async ()=>{
-    const { error } = await adminRemovePlayerPhoto(r.email, r.name);
-    if(error){ toast('Could not remove — ' + error); return; }
-    done('Photo removed');
-  });
-  $('apSuspend').addEventListener('click', async ()=>{
-    const hours = $('apDur').value==='custom' ? parseFloat($('apCustom').value)*24 : parseFloat($('apDur').value);
-    if(!hours || hours<=0){ toast('Enter a valid duration'); return; }
-    const { error } = await adminSuspendPlayer(r.reqId, hours);
-    if(error){ toast('Could not suspend — ' + error); return; }
-    done('Suspended');
-  });
-  if($('apRestore')) $('apRestore').addEventListener('click', async ()=>{
-    const { error } = await adminRestorePlayer(r.reqId);
-    if(error){ toast('Could not restore — ' + error); return; }
-    done('Restored');
-  });
-  if($('apBlock')) $('apBlock').addEventListener('click', ()=> confirmAction(`Block ${r.name} permanently? Only you can undo this.`, async ()=>{
-    const { error } = await adminBlockPlayer(r.reqId);
-    if(error){ toast('Could not block — ' + error); return; }
-    toast('Blocked'); refreshLbCache(); loadAndRenderAccessRequests();
-  }, 'Block'));
-  $('apDelete').addEventListener('click', ()=> confirmAction(`Permanently delete ${r.name}? This removes their request, leaderboard entry, and all daily records. This can't be undone.`, async ()=>{
-    const { error } = await adminDeletePlayerCompletely(r.reqId, r.email, r.name);
-    if(error){ toast('Could not delete — ' + error); return; }
-    toast('Deleted'); refreshLbCache(); loadAndRenderAccessRequests();
-  }, 'Delete'));
 }
 
 /* ---- Challenges: pick rivals from the real roster, race for N days, +5/-5 per day
@@ -3964,7 +3908,7 @@ function renderLeaderboard(main){
   <div class="grid grid-2">
     <div class="card" style="align-self:start;">
       <h3 style="font-size:16px; margin-bottom:12px;">Today's Ranking</h3>
-      <div id="lbList">${lbListHtml()}</div>
+      <div id="lbList">${lbCache.loaded ? (lbCache.rows.length ? lbCache.rows.map(leaderboardRowHtml).join('') : '<p class="sticky-empty">No one\'s studied yet today.</p>') : '<p class="sticky-empty" style="opacity:.7;">Loading…</p>'}</div>
       <p style="font-size:11px; color:var(--text-muted); margin-top:12px;" id="lbStatus"></p>
     </div>
     <div>
@@ -3986,8 +3930,6 @@ function renderLeaderboard(main){
   document.querySelectorAll('[data-delete-comp]').forEach(b=> b.addEventListener('click', ()=> deleteChallenge(b.dataset.deleteComp)));
   const lbListEl = document.getElementById('lbList');
   if(lbListEl) lbListEl.addEventListener('click', (e)=>{
-    const adm = isAdminUnlocked && e.target.closest('[data-admin-player]');
-    if(adm){ openAdminPlayerModal(adm.dataset.adminPlayer); return; }
     const row = e.target.closest('[data-view-player]');
     if(row) openPlayerWeeklyModal(row.dataset.viewPlayer);
   });
@@ -4466,7 +4408,7 @@ function renderSettings(main){
       pomo.remaining = pomoDuration('work');
       sbClient = null;
       avatarCache = {};
-      lbCache = { rows:[], restricted:[], challenges:[], loaded:false, error:null };
+      lbCache = { rows:[], challenges:[], loaded:false, error:null };
       applyTheme(); renderNav(); renderMain();
       toast('All data reset');
     }, 'Reset everything');
