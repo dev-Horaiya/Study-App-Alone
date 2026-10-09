@@ -3386,9 +3386,61 @@ function personAvatarByName(name, avatarDataUrl, sizeClass){
   const color = colors[(name||'?').charCodeAt(0) % colors.length];
   return `<div class="${cls}" style="background:${color};">${escapeHtml((name||'?')[0].toUpperCase())}</div>`;
 }
+async function fetchPlayerWeeklyMinutes(playerName){
+  const days = [];
+  for(let i=6;i>=0;i--){
+    const d = new Date();
+    d.setDate(d.getDate()-i);
+    days.push({ date: todayStr(d), mins:0, label: i===0 ? 'Today' : i===1 ? 'Yest' : d.toLocaleDateString(undefined,{weekday:'short'}) });
+  }
+  // Your own history is already complete locally — no need to round-trip for it.
+  if(playerName === state.profile.name){
+    days.forEach(d=>{ d.mins = minutesOnDate(d.date); });
+    return { days, error:null };
+  }
+  const client = getSbClient();
+  if(!client) return { days:null, error:'Not connected.' };
+  try{
+    const { data, error } = await client.from('daily_minutes').select('study_date,minutes')
+      .eq('player_name', playerName).in('study_date', days.map(d=>d.date));
+    if(error) return { days:null, error:error.message };
+    (data||[]).forEach(r=>{
+      const d = days.find(x=>x.date===r.study_date);
+      if(d) d.mins = Math.min(MAX_SANE_DAILY_MINUTES, Math.max(0, r.minutes||0));
+    });
+    return { days, error:null };
+  }catch(e){ return { days:null, error:e.message||'Network error' }; }
+}
+async function openPlayerWeeklyModal(name){
+  const row = (lbCache.rows||[]).find(r=>r.name===name);
+  const header = `<div class="row" style="gap:12px; align-items:center; margin-bottom:16px;">
+    ${personAvatarByName(name, row?row.avatarDataUrl:null, 'avatar')}
+    <div><div style="font-weight:700; font-size:16px;">${escapeHtml(name)}${name===state.profile.name?' <span class="lb-you">(you)</span>':''}</div>
+    <div style="font-size:12px; color:var(--text-muted);">Past 7 days</div></div>
+  </div>`;
+  openModal(`${header}<div id="playerWeeklyBody"><p style="font-size:13px; color:var(--text-muted);">Loading…</p></div>
+    <div class="modal-actions"><button class="btn" id="playerWeeklyClose">Close</button></div>`);
+  document.getElementById('playerWeeklyClose').addEventListener('click', closeModal);
+  const { days, error } = await fetchPlayerWeeklyMinutes(name);
+  const body = document.getElementById('playerWeeklyBody');
+  if(!body) return; // modal was closed while loading
+  if(error){ body.innerHTML = `<p style="font-size:13px; color:var(--danger);">Couldn't load — ${escapeHtml(error)}</p>`; return; }
+  const total = days.reduce((a,d)=>a+d.mins,0);
+  const activeDays = days.filter(d=>d.mins>0).length;
+  const best = days.reduce((b,d)=> d.mins>b.mins ? d : b, days[0]);
+  body.innerHTML = `
+    <div class="row" style="justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px; font-size:12.5px; color:var(--text-muted);">
+      <span>Daily avg <strong class="mono" style="color:var(--text);">${fmtMin(total/7)}</strong></span>
+      <span>Week total <strong class="mono" style="color:var(--text);">${fmtMin(total)}</strong></span>
+      <span>Active days <strong class="mono" style="color:var(--text);">${activeDays}/7</strong></span>
+    </div>
+    ${total===0 ? `<p style="font-size:13px; color:var(--text-muted); padding:12px 0;">No study time recorded in the last 7 days.</p>` : weeklyTrendChartHtml(days)}
+    ${total>0 ? `<p style="font-size:12px; color:var(--text-muted); margin-top:8px;">Best day: <strong style="color:var(--text);">${escapeHtml(best.label)}</strong> · ${fmtMin(best.mins)}</p>` : ''}
+    <p style="font-size:11px; color:var(--text-muted); margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">Only daily totals are shared to the leaderboard — subjects and session details stay on each person's own device.</p>`;
+}
 function leaderboardRowHtml(r, i){
   const medals = ['🥇','🥈','🥉'];
-  return `<div class="lb-row ${r.isMe?'lb-me':''}">
+  return `<div class="lb-row ${r.isMe?'lb-me':''}" data-view-player="${escapeHtml(r.name)}" style="cursor:pointer;">
     <span class="lb-rank">${medals[i] || (i+1)}</span>
     ${personAvatarByName(r.name, r.avatarDataUrl, 'avatar-sm')}
     <span class="lb-name">${escapeHtml(r.name)}${r.isMe?' <span class="lb-you">(you)</span>':''}</span>
@@ -3700,6 +3752,11 @@ function renderLeaderboard(main){
   </div>`;
   document.getElementById('newCompBtn').addEventListener('click', openNewCompetitionModal);
   document.querySelectorAll('[data-delete-comp]').forEach(b=> b.addEventListener('click', ()=> deleteChallenge(b.dataset.deleteComp)));
+  const lbListEl = document.getElementById('lbList');
+  if(lbListEl) lbListEl.addEventListener('click', (e)=>{
+    const row = e.target.closest('[data-view-player]');
+    if(row) openPlayerWeeklyModal(row.dataset.viewPlayer);
+  });
   pushMyPlayerRow(); pushMyDailyMinutes();
   refreshLbCache();
   startLbPoll();
